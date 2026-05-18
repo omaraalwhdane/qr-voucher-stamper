@@ -233,15 +233,13 @@ def _find_invoice(text):
             nums = re.findall(r"\d+", after)
             if not nums:
                 continue
-            # Skip ONLY groups that are known OCR misreads of ":" (typically "9" or "99")
-            # Do NOT skip arbitrary short groups — they may be the first part of a split number
-            # e.g. ":2229258" → OCR → "99 2229258" → skip "99" → "2229258" ✓
-            # e.g. ":2229258" → OCR → "22 29258"  → don't skip "22", join → "2229258" ✓
+            # Case 1 — separate artifact group: "99 2229258" → skip "99" → "2229258"
             while nums and nums[0] in ("9", "99"):
                 nums.pop(0)
             if not nums:
                 continue
             # If the first group is already ≥5 digits, use it directly
+            # (fused colon artifacts are handled by _find_invoice_image)
             if len(nums[0]) >= 5:
                 return nums[0]
             # Otherwise join groups until we reach ≥5 digits (handles split numbers)
@@ -250,6 +248,65 @@ def _find_invoice(text):
                 joined += n
                 if len(joined) >= 5:
                     return joined
+    return ""
+
+
+def _find_invoice_image(img, top_pct=0.12, bot_pct=0.30, right_pct=0.55):
+    """Extract invoice number spatially: find the INVOICE word bounding box,
+    crop from just past that word to the end of the line, and re-OCR with a
+    digit-only whitelist.
+
+    Starting close to the word (5 px gap) ensures the first digit is never
+    clipped.  The digit whitelist causes the colon to be read as whitespace or
+    a lone '9'; the trailing stripping logic removes any such artifact.
+    """
+    processed = _preprocess_for_ocr(img, top_pct, bot_pct, right_pct)
+    pw, ph = processed.size
+    try:
+        data = pytesseract.image_to_data(
+            processed, lang="eng", config="--psm 6 --oem 3",
+            output_type=pytesseract.Output.DICT)
+    except Exception:
+        return ""
+    for i, word in enumerate(data["text"]):
+        if not re.match(r"invoice", (word or "").strip(), re.IGNORECASE):
+            continue
+        x = data["left"][i]
+        y = data["top"][i]
+        w = data["width"][i]
+        h = data["height"][i]
+        # Start just 5 px past the word's right edge so we never clip the
+        # first digit of the number.  The colon between the word and the number
+        # will be in the crop, but the digit whitelist makes Tesseract output
+        # it as whitespace or at worst a single '9'.
+        x_start = x + w + 5
+        x_end   = min(x_start + 480, pw)
+        if x_start >= x_end:
+            continue
+        crop = processed.crop((x_start, max(0, y - 8), x_end, min(ph, y + h + 8)))
+        raw = pytesseract.image_to_string(
+            crop, lang="eng",
+            config="--psm 7 --oem 3 -c tessedit_char_whitelist=0123456789")
+        nums = re.findall(r"\d+", raw)
+        if not nums:
+            continue
+        # Strip leading isolated colon artifact ("9" or "99" as a separate group)
+        while nums and nums[0] in ("9", "99"):
+            nums.pop(0)
+        if not nums:
+            continue
+        # Strip leading fused colon artifact from an 8+ digit group
+        if len(nums[0]) >= 8:
+            remainder = nums[0].lstrip("9")
+            stripped  = len(nums[0]) - len(remainder)
+            if 1 <= stripped <= 2 and len(remainder) >= 6:
+                nums[0] = remainder
+        # Join any split groups
+        joined = ""
+        for n in nums:
+            joined += n
+            if len(joined) >= 5:
+                return joined
     return ""
 
 
@@ -331,6 +388,14 @@ def ocr_extract_fields(path):
     client  = _find_account(text1)
     year    = _find_year(_ocr(img, 0.15, 0.26))
 
+    # ── Pass 1b: image-based invoice extraction when text result is suspect ───
+    # Trigger when: missing, too long (≥8 → colon fused in as 9/99), or too
+    # short (≤6 → colon artifact ate a leading digit before we could see it).
+    if not voucher or len(voucher) >= 8 or len(voucher) <= 6:
+        img_voucher = _find_invoice_image(img, 0.12, 0.30)
+        if img_voucher:
+            voucher = img_voucher
+
     # ── Pass 2: wider crop if anything is still missing ───────────────────────
     if not voucher or not client or not year:
         text_wide = _ocr(img, 0.10, 0.40, right_pct=0.65)
@@ -340,6 +405,12 @@ def ocr_extract_fields(path):
             client = _find_account(text_wide)
         if not year:
             year = _find_year(text_wide)
+
+    # ── Pass 2b: wider image-based extraction if still suspect ────────────────
+    if not voucher or len(voucher) >= 8 or len(voucher) <= 6:
+        img_voucher = _find_invoice_image(img, 0.10, 0.40, right_pct=0.65)
+        if img_voucher:
+            voucher = img_voucher
 
     # ── Pass 3: full-page scan as last resort ─────────────────────────────────
     if not voucher or not client or not year:
