@@ -22,8 +22,14 @@ try:
     import qrcode
     import pytesseract
     from PIL import Image, ImageEnhance, ImageFilter
-    # Auto-detect Tesseract on Windows
-    if os.name == "nt":
+    # Auto-detect Tesseract — bundled (PyInstaller) or system install
+    import sys as _sys
+    if getattr(_sys, 'frozen', False):
+        # Running as a PyInstaller bundle — use bundled tesseract
+        _bundle_tess = os.path.join(_sys._MEIPASS, 'tesseract', 'tesseract.exe')
+        if os.path.exists(_bundle_tess):
+            pytesseract.pytesseract.tesseract_cmd = _bundle_tess
+    elif os.name == "nt":
         _win_tess = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
         if os.path.exists(_win_tess):
             pytesseract.pytesseract.tesseract_cmd = _win_tess

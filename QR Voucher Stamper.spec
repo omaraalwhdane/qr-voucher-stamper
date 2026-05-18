@@ -5,7 +5,7 @@ a = Analysis(
     ['voucher_qr_stamper.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('tesseract', 'tesseract')],
     hiddenimports=['PIL._tkinter_finder', 'pytesseract', 'qrcode'],
     hookspath=[],
     hooksconfig={},
