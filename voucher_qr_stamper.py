@@ -210,48 +210,98 @@ class ProgressDialog(tk.Toplevel):
 
 
 # ── OCR extraction ───────────────────────────────────────────────────────────
-def _preprocess_for_ocr(img, top_pct, bot_pct, right_pct=0.45):
+def _preprocess_for_ocr(img, top_pct, bot_pct, right_pct=0.55):
     w, h = img.size
     img = img.crop((0, int(h * top_pct), int(w * right_pct), int(h * bot_pct)))
     img = img.resize((img.width * 3, img.height * 3), Image.LANCZOS)
     img = img.convert("L")
-    img = ImageEnhance.Contrast(img).enhance(2.5)
+    img = ImageEnhance.Contrast(img).enhance(2.0)
     return img.filter(ImageFilter.SHARPEN)
+
+
+def _ocr(img, top_pct, bot_pct, right_pct=0.55, cfg="--psm 6 --oem 3"):
+    return pytesseract.image_to_string(
+        _preprocess_for_ocr(img, top_pct, bot_pct, right_pct),
+        lang="eng", config=cfg)
+
+
+def _find_invoice(text):
+    # Handles OCR artifacts: "INVOICE:", "INVOICE :", "INVOICE;", digit-only lines after label
+    m = re.search(r"INVOICE\s*[:\s;.]\s*[:\s]*(\d{4,})", text, re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    # Fallback: a standalone number ≥5 digits on the same/next line as INVOICE
+    m = re.search(r"INVOICE[^\n]*\n?\s*[:\s]*(\d{5,})", text, re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    return ""
+
+
+def _find_account(text):
+    m = re.search(r"ACCOUNT\s*[:\s;.]\s*[:\s]*([\d]+[-–—][\d]+)", text, re.IGNORECASE)
+    if m:
+        raw = re.sub(r"[–—]", "-", m.group(1).strip())
+        parts = raw.split("-", 1)
+        return parts[1] if len(parts) == 2 else raw
+    # Fallback: next line after ACCOUNT keyword
+    m = re.search(r"ACCOUNT[^\n]*\n\s*([\d]+[-–—][\d]+)", text, re.IGNORECASE)
+    if m:
+        raw = re.sub(r"[–—]", "-", m.group(1).strip())
+        parts = raw.split("-", 1)
+        return parts[1] if len(parts) == 2 else raw
+    return ""
+
+
+def _find_year(text):
+    # DATE label followed by dd-mm-yyyy or dd/mm/yyyy
+    m = re.search(r"DATE\s*[:\s;=.]+\s*\d{1,2}[-/]\d{1,2}[-/](\d{4})",
+                  text, re.IGNORECASE)
+    if m:
+        return m.group(1)
+    # Any date pattern in text
+    m = re.search(r"\b\d{1,2}[-/]\d{1,2}[-/](\d{4})\b", text)
+    if m:
+        return m.group(1)
+    return ""
 
 
 def ocr_extract_fields(path):
     img = Image.open(path)
     if img.mode not in ("RGB", "RGBA", "L"):
         img = img.convert("RGB")
-    cfg = "--psm 6 --oem 3"
 
-    text1 = pytesseract.image_to_string(
-        _preprocess_for_ocr(img, 0.14, 0.28), lang="eng", config=cfg)
     voucher = client = year = ""
 
-    m = re.search(r"INVOICE\s*[:\s]\s*(\d{5,})", text1, re.IGNORECASE)
-    if m:
-        voucher = m.group(1).strip()
+    # ── Pass 1: tight crop (fast, works on standard layout) ──────────────────
+    text1 = _ocr(img, 0.12, 0.30)
+    voucher = _find_invoice(text1)
+    client  = _find_account(text1)
+    year    = _find_year(_ocr(img, 0.15, 0.26))
 
-    m = re.search(r"ACCOUNT\s*[:\s]\s*([\d]+-[\d]+)", text1, re.IGNORECASE)
-    if m:
-        raw   = m.group(1).strip()
-        parts = raw.split("-", 1)
-        client = parts[1] if len(parts) == 2 else raw
+    # ── Pass 2: wider crop if anything is still missing ───────────────────────
+    if not voucher or not client or not year:
+        text_wide = _ocr(img, 0.10, 0.40, right_pct=0.65)
+        if not voucher:
+            voucher = _find_invoice(text_wide)
+        if not client:
+            client = _find_account(text_wide)
+        if not year:
+            year = _find_year(text_wide)
 
-    text2 = pytesseract.image_to_string(
-        _preprocess_for_ocr(img, 0.18, 0.24), lang="eng", config=cfg)
-    m = re.search(r"DATE\s*[:\s=]+\s*\d{1,2}[-/]\d{1,2}[-/](\d{4})",
-                  text2, re.IGNORECASE)
-    if m:
-        year = m.group(1)
-    else:
-        m = re.search(r"\b\d{1,2}[-/]\d{1,2}[-/](\d{4})\b", text2)
-        if m:
-            year = m.group(1)
+    # ── Pass 3: full-page scan as last resort ─────────────────────────────────
+    if not voucher or not client or not year:
+        text_full = pytesseract.image_to_string(
+            img.convert("L"), lang="eng", config="--psm 3 --oem 3")
+        if not voucher:
+            voucher = _find_invoice(text_full)
+        if not client:
+            client = _find_account(text_full)
+        if not year:
+            year = _find_year(text_full)
 
     return {"voucher": voucher, "year": year, "client": client,
             "type_label": TYPE_OPTIONS[0]}
+
 
 
 # ── QR stamping ──────────────────────────────────────────────────────────────
