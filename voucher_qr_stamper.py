@@ -226,23 +226,30 @@ def _ocr(img, top_pct, bot_pct, right_pct=0.55, cfg="--psm 6 --oem 3"):
 
 
 def _find_invoice(text):
-    """Find INVOICE number — robust against OCR inserting spaces/chars in the number."""
+    """Find INVOICE number — robust against OCR colon artifacts and split numbers."""
     for line in text.splitlines():
         if re.search(r"invoice", line, re.IGNORECASE):
             after = re.sub(r".*?invoice", "", line, flags=re.IGNORECASE)
             nums = re.findall(r"\d+", after)
             if not nums:
                 continue
-            # Accumulate digit groups until we have ≥5 digits total
-            # (handles OCR splitting "2229258" into "22" + "29258")
+            # Skip ONLY groups that are known OCR misreads of ":" (typically "9" or "99")
+            # Do NOT skip arbitrary short groups — they may be the first part of a split number
+            # e.g. ":2229258" → OCR → "99 2229258" → skip "99" → "2229258" ✓
+            # e.g. ":2229258" → OCR → "22 29258"  → don't skip "22", join → "2229258" ✓
+            while nums and nums[0] in ("9", "99"):
+                nums.pop(0)
+            if not nums:
+                continue
+            # If the first group is already ≥5 digits, use it directly
+            if len(nums[0]) >= 5:
+                return nums[0]
+            # Otherwise join groups until we reach ≥5 digits (handles split numbers)
             joined = ""
             for n in nums:
-                if len(joined) < 5:
-                    joined += n
-                else:
-                    break
-            if len(joined) >= 4:
-                return joined
+                joined += n
+                if len(joined) >= 5:
+                    return joined
     return ""
 
 
@@ -264,17 +271,50 @@ def _find_account(text):
     return ""
 
 
+def _fix_year(year_str):
+    """Correct common OCR misreads in 4-digit years (e.g. 2622 → 2022)."""
+    if not year_str or len(year_str) != 4:
+        return year_str
+    try:
+        y = int(year_str)
+    except ValueError:
+        return year_str
+    if 2000 <= y <= 2099:
+        return year_str  # already valid
+    # Try replacing each digit position with a corrected guess
+    # Most common: '6'→'0' in position 2 or 3 (e.g. 2622→2022, 2026→2026)
+    corrected = list(year_str)
+    ocr_fixes = {"6": "0", "8": "0", "5": "5", "O": "0", "o": "0", "l": "1", "I": "1"}
+    # Position 1 must be '0' for years 20xx
+    if corrected[0] == "2" and corrected[1] in ocr_fixes:
+        candidate = "2" + ocr_fixes[corrected[1]] + corrected[2] + corrected[3]
+        try:
+            if 2000 <= int(candidate) <= 2099:
+                return candidate
+        except ValueError:
+            pass
+    # Position 2: 20x? — check if pos 2 is an OCR artifact
+    if corrected[0] == "2" and corrected[1] == "0":
+        candidate = "20" + ocr_fixes.get(corrected[2], corrected[2]) + corrected[3]
+        try:
+            if 2000 <= int(candidate) <= 2099:
+                return candidate
+        except ValueError:
+            pass
+    return year_str
+
+
 def _find_year(text):
     """Find year from DATE line or any dd-mm-yyyy / dd/mm/yyyy pattern."""
     for line in text.splitlines():
         if re.search(r"date", line, re.IGNORECASE):
             m = re.search(r"\d{1,2}[-/]\d{1,2}[-/](\d{4})", line)
             if m:
-                return m.group(1)
+                return _fix_year(m.group(1))
     # Fallback: any date pattern in full text
     m = re.search(r"\b\d{1,2}[-/]\d{1,2}[-/](\d{4})\b", text)
     if m:
-        return m.group(1)
+        return _fix_year(m.group(1))
     return ""
 
 
