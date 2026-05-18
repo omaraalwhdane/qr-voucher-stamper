@@ -617,6 +617,13 @@ class VoucherQRApp(tk.Tk):
         vsb.grid(row=0, column=1, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
 
+        # Right-click context menu
+        self._ctx_menu = tk.Menu(self, tearoff=0)
+        self._ctx_menu.add_command(label="🔬  Debug OCR (show raw text)",
+                                   command=self._debug_ocr_selected)
+        self.tree.bind("<Button-3>", self._on_right_click)
+        self.tree.bind("<Button-2>", self._on_right_click)  # macOS two-finger
+
         # Empty-state label (sits on top of tree when no rows)
         self._empty = tk.Label(
             outer,
@@ -757,6 +764,56 @@ class VoucherQRApp(tk.Tk):
             "Click  🔍 Auto-read (OCR)  to extract voucher data automatically."
         )
 
+    def _on_right_click(self, event):
+        row = self.tree.identify_row(event.y)
+        if row:
+            self.tree.selection_set(row)
+            self._ctx_menu.post(event.x_root, event.y_root)
+
+    def _debug_ocr_selected(self):
+        sel = self.tree.selection()
+        if not sel:
+            return
+        path = self._paths.get(sel[0])
+        if not path:
+            return
+        import threading
+        def run():
+            try:
+                from PIL import Image
+                img = Image.open(path)
+                if img.mode not in ("RGB", "RGBA", "L"):
+                    img = img.convert("RGB")
+                t1 = _ocr(img, 0.12, 0.30)
+                t2 = _ocr(img, 0.10, 0.40, right_pct=0.65)
+                result = ocr_extract_fields(path)
+                msg = (
+                    f"File: {os.path.basename(path)}\n\n"
+                    f"── Extracted ──\n"
+                    f"  INVOICE : {result['voucher'] or '(not found)'}\n"
+                    f"  ACCOUNT : {result['client'] or '(not found)'}\n"
+                    f"  YEAR    : {result['year'] or '(not found)'}\n\n"
+                    f"── OCR Raw Text (pass 1) ──\n{t1}\n\n"
+                    f"── OCR Raw Text (pass 2) ──\n{t2}"
+                )
+            except Exception as exc:
+                msg = f"Error: {exc}"
+            self.after(0, lambda: _show_debug(msg))
+
+        def _show_debug(msg):
+            win = tk.Toplevel(self)
+            win.title("OCR Debug")
+            win.geometry("600x500")
+            txt = tk.Text(win, wrap="word", font=("Courier", 10), padx=8, pady=8)
+            sb  = ttk.Scrollbar(win, command=txt.yview)
+            txt.configure(yscrollcommand=sb.set)
+            sb.pack(side="right", fill="y")
+            txt.pack(fill="both", expand=True)
+            txt.insert("1.0", msg)
+            txt.config(state="disabled")
+
+        threading.Thread(target=run, daemon=True).start()
+
     def _remove_selected(self):
         for iid in self.tree.selection():
             self._paths.pop(iid, None)
@@ -863,13 +920,19 @@ class VoucherQRApp(tk.Tk):
                 self.after(0, self._refresh_stats)
                 n = len(items)
                 if failed:
-                    messagebox.showwarning(
-                        "OCR — Partial Results",
+                    # Build a detailed message showing what was/wasn't found
+                    detail_lines = []
+                    for entry in failed[:15]:
+                        detail_lines.append(entry)
+                    msg = (
                         f"{n - len(failed)} of {n} vouchers read successfully.\n\n"
                         f"Could not fully read {len(failed)} file(s):\n"
-                        + "\n".join(failed[:15])
+                        + "\n".join(detail_lines)
                         + ("\n…" if len(failed) > 15 else "")
-                        + "\n\nDouble-click those cells to fill manually.")
+                        + "\n\nTip: Double-click a cell to fill it manually.\n"
+                        "Or use  🔍 Debug OCR  (right-click a row) to see raw text."
+                    )
+                    messagebox.showwarning("OCR — Partial Results", msg)
                 else:
                     messagebox.showinfo(
                         "OCR Complete ✅",
