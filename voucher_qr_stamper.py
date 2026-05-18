@@ -226,39 +226,52 @@ def _ocr(img, top_pct, bot_pct, right_pct=0.55, cfg="--psm 6 --oem 3"):
 
 
 def _find_invoice(text):
-    # Handles OCR artifacts: "INVOICE:", "INVOICE :", "INVOICE;", digit-only lines after label
-    m = re.search(r"INVOICE\s*[:\s;.]\s*[:\s]*(\d{4,})", text, re.IGNORECASE)
-    if m:
-        return m.group(1).strip()
-    # Fallback: a standalone number ≥5 digits on the same/next line as INVOICE
-    m = re.search(r"INVOICE[^\n]*\n?\s*[:\s]*(\d{5,})", text, re.IGNORECASE)
-    if m:
-        return m.group(1).strip()
+    """Find INVOICE number — robust against OCR inserting spaces/chars in the number."""
+    for line in text.splitlines():
+        if re.search(r"invoice", line, re.IGNORECASE):
+            after = re.sub(r".*?invoice", "", line, flags=re.IGNORECASE)
+            nums = re.findall(r"\d+", after)
+            if not nums:
+                continue
+            # Accumulate digit groups until we have ≥5 digits total
+            # (handles OCR splitting "2229258" into "22" + "29258")
+            joined = ""
+            for n in nums:
+                if len(joined) < 5:
+                    joined += n
+                else:
+                    break
+            if len(joined) >= 4:
+                return joined
     return ""
 
 
 def _find_account(text):
-    m = re.search(r"ACCOUNT\s*[:\s;.]\s*[:\s]*([\d]+[-–—][\d]+)", text, re.IGNORECASE)
-    if m:
-        raw = re.sub(r"[–—]", "-", m.group(1).strip())
-        parts = raw.split("-", 1)
-        return parts[1] if len(parts) == 2 else raw
-    # Fallback: next line after ACCOUNT keyword
-    m = re.search(r"ACCOUNT[^\n]*\n\s*([\d]+[-–—][\d]+)", text, re.IGNORECASE)
-    if m:
-        raw = re.sub(r"[–—]", "-", m.group(1).strip())
-        parts = raw.split("-", 1)
-        return parts[1] if len(parts) == 2 else raw
+    """Find ACCOUNT number — returns the part after the dash (client code)."""
+    for line in text.splitlines():
+        if re.search(r"account", line, re.IGNORECASE):
+            after = re.sub(r".*?account", "", line, flags=re.IGNORECASE)
+            # Normalise dashes, then find X-YYYYYYY pattern
+            after = re.sub(r"[–—]", "-", after)
+            m = re.search(r"(\d+)-(\d+)", after)
+            if m:
+                return m.group(2)   # part after the dash
+            # Fallback: largest number ≥5 digits on line
+            nums = re.findall(r"\d+", after)
+            large = [n for n in nums if len(n) >= 5]
+            if large:
+                return max(large, key=len)
     return ""
 
 
 def _find_year(text):
-    # DATE label followed by dd-mm-yyyy or dd/mm/yyyy
-    m = re.search(r"DATE\s*[:\s;=.]+\s*\d{1,2}[-/]\d{1,2}[-/](\d{4})",
-                  text, re.IGNORECASE)
-    if m:
-        return m.group(1)
-    # Any date pattern in text
+    """Find year from DATE line or any dd-mm-yyyy / dd/mm/yyyy pattern."""
+    for line in text.splitlines():
+        if re.search(r"date", line, re.IGNORECASE):
+            m = re.search(r"\d{1,2}[-/]\d{1,2}[-/](\d{4})", line)
+            if m:
+                return m.group(1)
+    # Fallback: any date pattern in full text
     m = re.search(r"\b\d{1,2}[-/]\d{1,2}[-/](\d{4})\b", text)
     if m:
         return m.group(1)
