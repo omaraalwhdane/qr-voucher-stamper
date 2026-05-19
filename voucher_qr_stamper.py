@@ -1414,7 +1414,7 @@ class VoucherQRApp(tk.Tk):
 
         def worker():
             failed = []
-            quota_warned = False
+            ai_warned = False      # suppress repeated AI error dialogs
             for done, iid in enumerate(items, 1):
                 if dlg.cancelled:
                     break
@@ -1439,29 +1439,33 @@ class VoucherQRApp(tk.Tk):
                             tags=(base, etag))
                     self.after(0, _upd)
 
-                    if ai_err:
+                    if ai_err and not ai_warned:
+                        ai_warned = True
                         is_quota = "RESOURCE_EXHAUSTED" in ai_err or "429" in ai_err
                         is_auth  = "authentication" in ai_err.lower() or "401" in ai_err
-                        if is_quota and quota_warned:
-                            pass
-                        else:
-                            if is_quota:
-                                quota_warned = True
-                            def _warn_ai(err=ai_err, is_q=is_quota, is_a=is_auth):
-                                if is_a:
-                                    msg = ("Claude API key is invalid or expired.\n\n"
-                                           "Go to  🔑 AI Key  in the toolbar to update it.\n\n"
-                                           "Fell back to Tesseract OCR.")
-                                elif is_q:
-                                    msg = ("Claude API quota reached.\n\n"
-                                           "Options:\n"
-                                           "  • Check your usage at console.anthropic.com\n"
-                                           "  • Add a Gemini key in  🔑 AI Key  as a fallback\n\n"
-                                           "Remaining files fell back to Tesseract OCR.")
-                                else:
-                                    msg = (f"AI error: {err}\n\nFell back to Tesseract OCR.")
-                                messagebox.showwarning("AI Read Failed", msg)
-                            self.after(0, _warn_ai)
+                        is_missing = "not installed" in ai_err
+                        def _warn_ai(err=ai_err, is_q=is_quota,
+                                     is_a=is_auth, is_m=is_missing):
+                            if is_m:
+                                msg = ("AI library not installed.\n\n"
+                                       "Run in Command Prompt:\n"
+                                       "    pip install anthropic\n\n"
+                                       "Then restart the app.\n"
+                                       "Fell back to Tesseract OCR for this batch.")
+                            elif is_a:
+                                msg = ("Claude API key is invalid or expired.\n\n"
+                                       "Go to  🔑 AI Key  in the toolbar to update it.\n\n"
+                                       "Fell back to Tesseract OCR.")
+                            elif is_q:
+                                msg = ("Claude API quota reached.\n\n"
+                                       "Options:\n"
+                                       "  • Check your usage at console.anthropic.com\n"
+                                       "  • Add a Gemini key in  🔑 AI Key  as a fallback\n\n"
+                                       "Remaining files fell back to Tesseract OCR.")
+                            else:
+                                msg = (f"AI error: {err}\n\nFell back to Tesseract OCR.")
+                            messagebox.showwarning("AI Read Failed", msg)
+                        self.after(0, _warn_ai)
 
                     if not all_found:
                         failed.append(fname)
