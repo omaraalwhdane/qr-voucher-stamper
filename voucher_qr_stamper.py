@@ -190,6 +190,148 @@ class EditableTreeview(ttk.Treeview):
         self.item(item, values=vals)
 
 
+# ── UI string translations ────────────────────────────────────────────────────
+_STRINGS = {
+    "en": {
+        "app_title":        "Petra Drug Store  —  QR Voucher Stamper",
+        "app_sub":          "Batch-stamp QR codes onto pharmacy voucher images  •  "
+                            "AI-powered OCR auto-fill  •  Duplicate & mismatch detection",
+        "btn_add":          "➕  Add Images",
+        "btn_folder":       "📂  Folder",
+        "btn_autoread":     "🔍  Auto-read",
+        "btn_verify":       "✔  Verify",
+        "btn_remove":       "✖  Remove",
+        "btn_mismatch":     "❌  Mismatches",
+        "btn_clear":        "🗑  Clear All",
+        "btn_browse":       "Browse…",
+        "btn_generate":     "⚡  Generate QR Codes",
+        "lbl_outfolder":    "📁  Output Folder:",
+        "out_placeholder":  "(click Browse to choose output folder)",
+        "col_filename":     "  Filename",
+        "col_voucher":      "  Voucher # (INVOICE)",
+        "col_client":       "  Client # (ACCOUNT)",
+        "col_year":         "  Year",
+        "col_type":         "  Type",
+        "col_match":        "OCR Match",
+        "col_reader":       "Read by",
+        "empty_title":      "No images loaded yet",
+        "empty_sub":        "Click  ➕ Add Images  or  📂 Folder  to get started,\n"
+                            "then  🔍 Auto-read  to extract invoice data automatically.",
+        "status_ready":     "Ready  —  no images loaded",
+        "stat_image":       "image",
+        "stat_images":      "images",
+        "stat_matched":     "matched",
+        "stat_mismatch":    "mismatch",
+        "stat_mismatches":  "mismatches",
+        "footer_tag":       "Petra Drug Store  —  QR Voucher Stamper",
+        "ai_claude_on":     "✅  Claude: ON",
+        "ai_gemini_on":     "🤖  Gemini: ON",
+        "ai_key":           "🔑  AI Key",
+        "lang_switch":      "عربي",
+        "dlg_no_images":    "No Images",
+        "dlg_no_images_msg":"Please add voucher images first.",
+        "dlg_no_found":     "No Images Found",
+        "dlg_already":      "Already Loaded",
+        "dlg_already_msg":  "All selected images are already in the table.",
+        "dlg_ai_title":     "AI Settings",
+        "dlg_ai_heading":   "AI Vision Settings",
+        "dlg_ai_desc":      "Claude is the primary AI reader (highest accuracy).\n"
+                            "Gemini is used as a free fallback if no Claude key is set.",
+        "dlg_claude_key":   "Claude Key  (PRIMARY):",
+        "dlg_claude_hint":  "console.anthropic.com  —  most accurate, requires API credit",
+        "dlg_gemini_key":   "Gemini Key  (fallback):",
+        "dlg_gemini_hint":  "aistudio.google.com  —  free tier, used only if no Claude key",
+        "dlg_show_keys":    "Show keys",
+        "dlg_save":         "Save",
+        "dlg_cancel":       "Cancel",
+        "dlg_ai_enabled":   "AI Enabled",
+        "progress_reading": "Reading Vouchers…",
+        "progress_verifying":"Verifying Data…",
+        "sel_title":        "Select Voucher Images",
+        "sel_folder":       "Select Folder Containing Voucher Images",
+        "out_choose":       "Choose Output Folder",
+        "tip_add":          "Select voucher JPG/PNG files  (⌘O)",
+        "tip_folder":       "Load all images from a folder",
+        "tip_autoread":     "Read INVOICE, DATE, ACCOUNT via AI+OCR  (⌘R)",
+        "tip_verify":       "Re-scan and compare table data vs image  (⌘K)",
+        "tip_remove":       "Remove selected rows",
+        "tip_mismatch":     "Delete all rows where OCR data does not match",
+        "tip_clear":        "Remove all rows",
+        "tip_browse":       "Choose where stamped images are saved",
+        "tip_generate":     "Stamp QR codes onto all loaded images  (⌘↩)",
+        "tip_ai":           "Configure Claude API key for AI-powered OCR",
+    },
+    "ar": {
+        "app_title":        "مستودعات البتراء الطبية  —  ختم رمز QR",
+        "app_sub":          "ختم رموز QR على صور سندات الصيدلية  •  "
+                            "قراءة ذكية تلقائية  •  كشف التكرار والتعارض",
+        "btn_add":          "➕  إضافة صور",
+        "btn_folder":       "📂  مجلد",
+        "btn_autoread":     "🔍  قراءة تلقائية",
+        "btn_verify":       "✔  تحقق",
+        "btn_remove":       "✖  حذف",
+        "btn_mismatch":     "❌  غير متطابق",
+        "btn_clear":        "🗑  مسح الكل",
+        "btn_browse":       "استعراض…",
+        "btn_generate":     "⚡  توليد رموز QR",
+        "lbl_outfolder":    "📁  مجلد الإخراج:",
+        "out_placeholder":  "(انقر استعراض لاختيار مجلد الإخراج)",
+        "col_filename":     "  اسم الملف",
+        "col_voucher":      "  رقم السند",
+        "col_client":       "  رقم العميل",
+        "col_year":         "  السنة",
+        "col_type":         "  النوع",
+        "col_match":        "تطابق",
+        "col_reader":       "قُرئ بـ",
+        "empty_title":      "لم يتم تحميل صور بعد",
+        "empty_sub":        "انقر  ➕ إضافة صور  أو  📂 مجلد  للبدء،\n"
+                            "ثم  🔍 قراءة تلقائية  لاستخراج البيانات.",
+        "status_ready":     "جاهز  —  لا توجد صور",
+        "stat_image":       "صورة",
+        "stat_images":      "صور",
+        "stat_matched":     "متطابق",
+        "stat_mismatch":    "غير متطابق",
+        "stat_mismatches":  "غير متطابقة",
+        "footer_tag":       "مستودعات البتراء الطبية  —  ختم رمز QR",
+        "ai_claude_on":     "✅  كلود: فعّال",
+        "ai_gemini_on":     "🤖  جيميناي: فعّال",
+        "ai_key":           "🔑  مفتاح الذكاء",
+        "lang_switch":      "English",
+        "dlg_no_images":    "لا توجد صور",
+        "dlg_no_images_msg":"يرجى إضافة صور السندات أولاً.",
+        "dlg_no_found":     "لا توجد صور",
+        "dlg_already":      "محمّل مسبقاً",
+        "dlg_already_msg":  "جميع الصور المحددة موجودة بالفعل في الجدول.",
+        "dlg_ai_title":     "إعدادات الذكاء الاصطناعي",
+        "dlg_ai_heading":   "إعدادات رؤية الذكاء الاصطناعي",
+        "dlg_ai_desc":      "كلود هو القارئ الذكي الأساسي (أعلى دقة).\n"
+                            "جيميناي يُستخدم كاحتياطي مجاني إذا لم يُضبط مفتاح كلود.",
+        "dlg_claude_key":   "مفتاح كلود  (أساسي):",
+        "dlg_claude_hint":  "console.anthropic.com  —  الأدق، يتطلب رصيداً في الحساب",
+        "dlg_gemini_key":   "مفتاح جيميناي  (احتياطي):",
+        "dlg_gemini_hint":  "aistudio.google.com  —  مجاني، يُستخدم فقط بدون مفتاح كلود",
+        "dlg_show_keys":    "إظهار المفاتيح",
+        "dlg_save":         "حفظ",
+        "dlg_cancel":       "إلغاء",
+        "dlg_ai_enabled":   "تم تفعيل الذكاء الاصطناعي",
+        "progress_reading": "جاري قراءة السندات…",
+        "progress_verifying":"جاري التحقق من البيانات…",
+        "sel_title":        "اختر صور السندات",
+        "sel_folder":       "اختر مجلد صور السندات",
+        "out_choose":       "اختر مجلد الإخراج",
+        "tip_add":          "اختر ملفات JPG/PNG  (⌘O)",
+        "tip_folder":       "تحميل جميع الصور من مجلد",
+        "tip_autoread":     "قراءة رقم السند والتاريخ والحساب  (⌘R)",
+        "tip_verify":       "إعادة الفحص ومقارنة البيانات  (⌘K)",
+        "tip_remove":       "حذف الصفوف المحددة",
+        "tip_mismatch":     "حذف جميع الصفوف غير المتطابقة",
+        "tip_clear":        "مسح جميع الصفوف",
+        "tip_browse":       "اختر مجلد حفظ الصور المختومة",
+        "tip_generate":     "ختم رموز QR على جميع الصور  (⌘↩)",
+        "tip_ai":           "ضبط مفتاح كلود للقراءة الذكية",
+    },
+}
+
 # ── Design tokens ─────────────────────────────────────────────────────────────
 _BG      = "#F8FAFC"   # page background
 _SURF    = "#FFFFFF"   # cards / surfaces
@@ -706,6 +848,9 @@ class VoucherQRApp(tk.Tk):
 
         self._output_folder = tk.StringVar(value="")
         self._paths: dict[str, str] = {}
+        self._lang: str = _load_config().get("lang", "en")
+        self._lw:   dict = {}          # language-switchable widgets
+        self._out_placeholder_active = True
 
         self._setup_styles()
         self._build_ui()
@@ -768,6 +913,7 @@ class VoucherQRApp(tk.Tk):
 
     # ── Header ────────────────────────────────────────────────────────────────
     def _build_header(self):
+        T = _STRINGS[self._lang]
         hdr = tk.Frame(self, bg=_DARK)
         hdr.grid(row=0, column=0, sticky="ew")
         hdr.columnconfigure(2, weight=1)
@@ -781,23 +927,32 @@ class VoucherQRApp(tk.Tk):
                  bg=_DARK, fg="white").grid(
             row=0, column=1, rowspan=2, padx=(16, 12), pady=12)
 
-        tk.Label(hdr, text="Petra Drug Store  —  QR Voucher Stamper",
-                 bg=_DARK, fg="#F1F5F9",
-                 font=("Helvetica", 15, "bold")).grid(
-            row=0, column=2, sticky="w", pady=(14, 2))
-        tk.Label(hdr,
-                 text="Batch-stamp QR codes onto pharmacy voucher images  •  "
-                      "AI-powered OCR auto-fill  •  Duplicate & mismatch detection",
-                 bg=_DARK, fg="#94A3B8",
-                 font=("Helvetica", 10)).grid(
-            row=1, column=2, sticky="w", pady=(0, 12))
+        lbl_title = tk.Label(hdr, text=T["app_title"],
+                             bg=_DARK, fg="#F1F5F9",
+                             font=("Helvetica", 15, "bold"))
+        lbl_title.grid(row=0, column=2, sticky="w", pady=(14, 2))
+        self._lw["app_title"] = lbl_title
+
+        lbl_sub = tk.Label(hdr, text=T["app_sub"],
+                           bg=_DARK, fg="#94A3B8",
+                           font=("Helvetica", 10))
+        lbl_sub.grid(row=1, column=2, sticky="w", pady=(0, 12))
+        self._lw["app_sub"] = lbl_sub
+
+        # Language toggle button (top-right of header)
+        lang_btn = _chip(hdr, T["lang_switch"],
+                         "#1A3255", "#7EB8DC", self._toggle_lang,
+                         hover="#1E3D66", size=11, bold=True, px=14, py=6)
+        lang_btn.grid(row=0, column=3, rowspan=2, padx=(0, 16), pady=8)
+        self._lw["lang_switch"] = lang_btn
 
         # Bottom rule
         tk.Frame(hdr, bg=_ACCENT, height=2).grid(
-            row=2, column=0, columnspan=3, sticky="ew")
+            row=2, column=0, columnspan=4, sticky="ew")
 
     # ── Toolbar ───────────────────────────────────────────────────────────────
     def _build_toolbar(self):
+        T = _STRINGS[self._lang]
         outer = tk.Frame(self, bg=_SURF)
         outer.grid(row=1, column=0, sticky="ew")
         outer.columnconfigure(0, weight=1)
@@ -806,41 +961,38 @@ class VoucherQRApp(tk.Tk):
         row1 = tk.Frame(outer, bg=_SURF)
         row1.grid(row=0, column=0, sticky="ew", padx=14, pady=(10, 6))
 
-        # Import group
-        _chip(row1, "➕  Add Images", _ACCL, _ACCENT, self._add_images,
-              hover="#BFDBFE", tip="Select voucher JPG/PNG files  (⌘O)"
-              ).pack(side="left", padx=(0, 4))
-        _chip(row1, "📂  Folder", _ACCL, _ACCENT, self._add_folder,
-              hover="#BFDBFE", tip="Load all images from a folder"
-              ).pack(side="left", padx=(0, 10))
+        def _add(key, bg, fg, cmd, hover, bold=False, tip_key=None):
+            b = _chip(row1, T[key], bg, fg, cmd,
+                      hover=hover, bold=bold,
+                      tip=T.get(tip_key or ("tip_" + key.replace("btn_", ""))))
+            self._lw[key] = b
+            return b
+
+        _add("btn_add",    _ACCL, _ACCENT, self._add_images,    "#BFDBFE",
+             tip_key="tip_add").pack(side="left", padx=(0, 4))
+        _add("btn_folder", _ACCL, _ACCENT, self._add_folder,    "#BFDBFE",
+             tip_key="tip_folder").pack(side="left", padx=(0, 10))
 
         tk.Frame(row1, bg=_BORDER, width=1).pack(side="left", fill="y", padx=(0, 10))
 
-        # OCR group
-        _chip(row1, "🔍  Auto-read", _ACCENT, _SURF, self._auto_read_all,
-              hover=_ACCH, bold=True, tip="Read INVOICE, DATE, ACCOUNT via AI+OCR  (⌘R)"
-              ).pack(side="left", padx=(0, 4))
-        _chip(row1, "✔  Verify", _ACCENT, _SURF, self._verify_all,
-              hover=_ACCH, bold=True, tip="Re-scan and compare table data vs image  (⌘K)"
-              ).pack(side="left", padx=(0, 10))
+        _add("btn_autoread", _ACCENT, _SURF, self._auto_read_all, _ACCH,
+             bold=True, tip_key="tip_autoread").pack(side="left", padx=(0, 4))
+        _add("btn_verify",   _ACCENT, _SURF, self._verify_all,    _ACCH,
+             bold=True, tip_key="tip_verify").pack(side="left", padx=(0, 10))
 
         tk.Frame(row1, bg=_BORDER, width=1).pack(side="left", fill="y", padx=(0, 10))
 
-        # Remove group
-        _chip(row1, "✖  Remove", _DANL, _DANGER, self._remove_selected,
-              hover="#FECACA", tip="Remove selected rows"
-              ).pack(side="left", padx=(0, 4))
-        _chip(row1, "❌  Mismatches", _DANL, _DANGER, self._remove_mismatches,
-              hover="#FECACA", tip="Delete all rows where OCR data does not match"
-              ).pack(side="left", padx=(0, 4))
-        _chip(row1, "🗑  Clear All", _DANL, _DANGER, self._clear_all,
-              hover="#FECACA", tip="Remove all rows"
-              ).pack(side="left")
+        _add("btn_remove",   _DANL, _DANGER, self._remove_selected,  "#FECACA",
+             tip_key="tip_remove").pack(side="left", padx=(0, 4))
+        _add("btn_mismatch", _DANL, _DANGER, self._remove_mismatches, "#FECACA",
+             tip_key="tip_mismatch").pack(side="left", padx=(0, 4))
+        _add("btn_clear",    _DANL, _DANGER, self._clear_all,         "#FECACA",
+             tip_key="tip_clear").pack(side="left")
 
         # AI indicator (right)
-        self._ai_btn = _chip(row1, "🔑  AI Key", _VIOL, _VIOLET,
+        self._ai_btn = _chip(row1, T["ai_key"], _VIOL, _VIOLET,
                              self._show_ai_settings, hover="#DDD6FE",
-                             tip="Configure Claude API key for AI-powered OCR")
+                             tip=T["tip_ai"])
         self._ai_btn.pack(side="right")
         self._refresh_ai_btn()
 
@@ -849,9 +1001,10 @@ class VoucherQRApp(tk.Tk):
         row2.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 10))
         row2.columnconfigure(1, weight=1)
 
-        tk.Label(row2, text="📁  Output Folder:", bg=_SURF, fg=_TXT2,
-                 font=("Helvetica", 10, "bold")).grid(
-            row=0, column=0, sticky="w", padx=(0, 8))
+        lbl_of = tk.Label(row2, text=T["lbl_outfolder"], bg=_SURF, fg=_TXT2,
+                          font=("Helvetica", 10, "bold"))
+        lbl_of.grid(row=0, column=0, sticky="w", padx=(0, 8))
+        self._lw["lbl_outfolder"] = lbl_of
 
         self._out_lbl = tk.Label(row2, textvariable=self._output_folder,
                                  bg=_SURF, fg=_ACCENT,
@@ -859,12 +1012,12 @@ class VoucherQRApp(tk.Tk):
                                  cursor="hand2", anchor="w")
         self._out_lbl.grid(row=0, column=1, sticky="ew", padx=(0, 8))
         self._out_lbl.bind("<Button-1>", lambda _e: self._set_output())
-        self._output_folder.set("(click Browse to choose output folder)")
+        self._output_folder.set(T["out_placeholder"])
 
-        _chip(row2, "Browse…", _BG, _TXT2, self._set_output,
-              hover=_BORDER, px=12, py=5,
-              tip="Choose where stamped images are saved"
-              ).grid(row=0, column=2)
+        b_browse = _chip(row2, T["btn_browse"], _BG, _TXT2, self._set_output,
+                         hover=_BORDER, px=12, py=5, tip=T["tip_browse"])
+        b_browse.grid(row=0, column=2)
+        self._lw["btn_browse"] = b_browse
 
         # Bottom border
         tk.Frame(outer, bg=_BORDER, height=1).grid(row=2, column=0, sticky="ew")
@@ -930,16 +1083,20 @@ class VoucherQRApp(tk.Tk):
 
         inner_e = tk.Frame(self._empty, bg=_SURF)
         inner_e.grid(row=0, column=0)
+        T = _STRINGS[self._lang]
         tk.Label(inner_e, text="📂", font=("", 52),
                  bg=_SURF, fg=_BORDER).pack(pady=(0, 10))
-        tk.Label(inner_e, text="No images loaded yet",
-                 bg=_SURF, fg=_TXT2,
-                 font=("Helvetica", 16, "bold")).pack()
-        tk.Label(inner_e,
-                 text="Click  ➕ Add Images  or  📂 Folder  to get started,\n"
-                      "then  🔍 Auto-read  to extract invoice data automatically.",
-                 bg=_SURF, fg=_TXT3,
-                 font=("Helvetica", 11), justify="center").pack(pady=(6, 0))
+        lbl_et = tk.Label(inner_e, text=T["empty_title"],
+                          bg=_SURF, fg=_TXT2,
+                          font=("Helvetica", 16, "bold"))
+        lbl_et.pack()
+        self._lw["empty_title"] = lbl_et
+
+        lbl_es = tk.Label(inner_e, text=T["empty_sub"],
+                          bg=_SURF, fg=_TXT3,
+                          font=("Helvetica", 11), justify="center")
+        lbl_es.pack(pady=(6, 0))
+        self._lw["empty_sub"] = lbl_es
 
     # ── Status bar ────────────────────────────────────────────────────────────
     def _build_statusbar(self):
@@ -955,11 +1112,13 @@ class VoucherQRApp(tk.Tk):
                  bg="#F1F5F9", fg=_TXT2,
                  font=("Helvetica", 10)).pack(side="left")
 
-        gen = _chip(inner, "⚡  Generate QR Codes",
+        T = _STRINGS[self._lang]
+        gen = _chip(inner, T["btn_generate"],
                     _ACCENT, _SURF, self._start_processing,
                     hover=_ACCH, bold=True, size=12, px=22, py=9,
-                    tip="Stamp QR codes onto all loaded images  (⌘↩)")
+                    tip=T["tip_generate"])
         gen.pack(side="right")
+        self._lw["btn_generate"] = gen
 
     # ── Footer ────────────────────────────────────────────────────────────────
     def _build_footer(self):
@@ -973,10 +1132,11 @@ class VoucherQRApp(tk.Tk):
         inner = tk.Frame(footer, bg=_DARK)
         inner.pack(fill="x", padx=16, pady=9)
 
-        tk.Label(inner,
-                 text="Petra Drug Store  —  QR Voucher Stamper",
-                 bg=_DARK, fg="#4A6A8A",
-                 font=("Helvetica", 9)).pack(side="left")
+        lbl_tag = tk.Label(inner, text=_STRINGS[self._lang]["footer_tag"],
+                           bg=_DARK, fg="#4A6A8A",
+                           font=("Helvetica", 9))
+        lbl_tag.pack(side="left")
+        self._lw["footer_tag"] = lbl_tag
 
         right = tk.Frame(inner, bg=_DARK)
         right.pack(side="right")
@@ -1005,6 +1165,41 @@ class VoucherQRApp(tk.Tk):
                  font=("Helvetica", 9)).pack(side="left")
 
 
+    # ── Language switching ────────────────────────────────────────────────────
+    def _t(self, key: str) -> str:
+        return _STRINGS[self._lang].get(key, _STRINGS["en"].get(key, key))
+
+    def _toggle_lang(self):
+        self._lang = "ar" if self._lang == "en" else "en"
+        cfg = _load_config()
+        cfg["lang"] = self._lang
+        _save_config(cfg)
+        self._apply_lang()
+
+    def _apply_lang(self):
+        T = _STRINGS[self._lang]
+        # update plain text widgets
+        for key, widget in self._lw.items():
+            if key in T:
+                widget.configure(text=T[key])
+        # update tree column headings
+        col_map = [
+            ("filename", "col_filename"), ("voucher", "col_voucher"),
+            ("client",   "col_client"),   ("year",    "col_year"),
+            ("type",     "col_type"),     ("match",   "col_match"),
+            ("reader",   "col_reader"),
+        ]
+        for col, key in col_map:
+            self.tree.heading(col, text=T[key])
+        # update output folder placeholder if still showing it
+        if self._out_placeholder_active:
+            self._output_folder.set(T["out_placeholder"])
+        # update window title
+        self.title(T["app_title"])
+        # re-render dynamic texts
+        self._refresh_stats()
+        self._refresh_ai_btn()
+
     def _restripe(self):
         for iid in self.tree.get_children():
             cur = [t for t in self.tree.item(iid, "tags")
@@ -1013,18 +1208,22 @@ class VoucherQRApp(tk.Tk):
             self.tree.item(iid, tags=(base, *cur))
 
     def _refresh_stats(self):
+        T   = _STRINGS[self._lang]
         items = self.tree.get_children()
         n = len(items)
         if n == 0:
-            self._stat_var.set("Ready  —  no images loaded")
+            self._stat_var.set(T["status_ready"])
             self._empty.lift()
             return
         self._empty.lower()
         yes = sum(1 for i in items if "match_yes" in self.tree.item(i, "tags"))
         no  = sum(1 for i in items if "match_no"  in self.tree.item(i, "tags"))
-        parts = [f"📄 {n} image{'s' if n != 1 else ''}"]
-        if yes: parts.append(f"✅ {yes} matched")
-        if no:  parts.append(f"❌ {no} mismatch{'es' if no != 1 else ''}")
+        img_word = T["stat_image"] if n == 1 else T["stat_images"]
+        parts = [f"📄 {n} {img_word}"]
+        if yes: parts.append(f"✅ {yes} {T['stat_matched']}")
+        if no:
+            mm = T["stat_mismatch"] if no == 1 else T["stat_mismatches"]
+            parts.append(f"❌ {no} {mm}")
         out = self._output_folder.get()
         if out and os.path.isdir(out):
             short = out if len(out) <= 44 else "…" + out[-42:]
@@ -1034,12 +1233,12 @@ class VoucherQRApp(tk.Tk):
     # ── Button handlers ───────────────────────────────────────────────────────
     def _add_images(self):
         paths = filedialog.askopenfilenames(
-            title="Select Voucher Images",
+            title=self._t("sel_title"),
             filetypes=[("Images", "*.jpg *.jpeg *.png"), ("All files", "*.*")])
         self._insert_paths(list(paths))
 
     def _add_folder(self):
-        folder = filedialog.askdirectory(title="Select Folder Containing Voucher Images")
+        folder = filedialog.askdirectory(title=self._t("sel_folder"))
         if not folder:
             return
         exts = {".jpg", ".jpeg", ".png"}
@@ -1173,16 +1372,17 @@ class VoucherQRApp(tk.Tk):
         self._refresh_stats()
 
     def _set_output(self):
-        folder = filedialog.askdirectory(title="Select Output Folder")
+        folder = filedialog.askdirectory(title=self._t("out_choose"))
         if folder:
             self._output_folder.set(folder)
+            self._out_placeholder_active = False
             self._refresh_stats()
 
     # ── OCR workers ───────────────────────────────────────────────────────────
     def _run_ocr_worker(self, title, process_fn):
         items = self.tree.get_children()
         if not items:
-            messagebox.showinfo("No Images", "Please add voucher images first.")
+            messagebox.showinfo(self._t("dlg_no_images"), self._t("dlg_no_images_msg"))
             return
         dlg = ProgressDialog(self, total=len(items), title=title)
         def worker():
@@ -1208,9 +1408,9 @@ class VoucherQRApp(tk.Tk):
     def _auto_read_all(self):
         items = self.tree.get_children()
         if not items:
-            messagebox.showinfo("No Images", "Please add voucher images first.")
+            messagebox.showinfo(self._t("dlg_no_images"), self._t("dlg_no_images_msg"))
             return
-        dlg = ProgressDialog(self, total=len(items), title="Reading Vouchers…")
+        dlg = ProgressDialog(self, total=len(items), title=self._t("progress_reading"))
 
         def worker():
             failed = []
@@ -1300,9 +1500,9 @@ class VoucherQRApp(tk.Tk):
     def _verify_all(self):
         items = self.tree.get_children()
         if not items:
-            messagebox.showinfo("No Images", "Please add voucher images first.")
+            messagebox.showinfo(self._t("dlg_no_images"), self._t("dlg_no_images_msg"))
             return
-        dlg = ProgressDialog(self, total=len(items), title="Verifying Data…")
+        dlg = ProgressDialog(self, total=len(items), title=self._t("progress_verifying"))
 
         def worker():
             mismatches = []
@@ -1433,7 +1633,7 @@ class VoucherQRApp(tk.Tk):
 
     def _start_processing(self):
         if not self.tree.get_children():
-            messagebox.showinfo("No Images", "Please add voucher images first.")
+            messagebox.showinfo(self._t("dlg_no_images"), self._t("dlg_no_images_msg"))
             return
         out = self._output_folder.get()
         if not out or not os.path.isdir(out):
@@ -1487,73 +1687,82 @@ class VoucherQRApp(tk.Tk):
     def _refresh_ai_btn(self):
         if _get_ai_key():
             bg, fg, hov = _SUCC_L, _SUCCESS, "#A7F3D0"
-            label = "✅  Claude: ON"
+            label = self._t("ai_claude_on")
         elif _get_gemini_key():
             bg, fg, hov = _VIOL, _VIOLET, "#DDD6FE"
-            label = "🤖  Gemini: ON"
+            label = self._t("ai_gemini_on")
         else:
             bg, fg, hov = _VIOL, _VIOLET, "#DDD6FE"
-            label = "🔑  AI Key"
+            label = self._t("ai_key")
         self._ai_btn.configure(text=label, bg=bg, fg=fg)
         self._ai_btn.bind("<Enter>", lambda _e, w=self._ai_btn, c=hov: w.configure(bg=c))
         self._ai_btn.bind("<Leave>", lambda _e, w=self._ai_btn, c=bg:  w.configure(bg=c))
 
     def _show_ai_settings(self):
+        T   = _STRINGS[self._lang]
         dlg = tk.Toplevel(self)
-        dlg.title("AI Settings")
+        dlg.title(T["dlg_ai_title"])
         dlg.resizable(False, False)
         dlg.grab_set()
+        dlg.configure(bg=_SURF)
 
-        pad = dict(padx=14, pady=5)
+        # Top accent strip
+        tk.Frame(dlg, bg=_ACCENT, height=3).grid(
+            row=0, column=0, columnspan=2, sticky="ew")
 
-        ttk.Label(dlg, text="AI Vision Settings",
-                  font=("Helvetica", 13, "bold")).grid(
-            row=0, column=0, columnspan=2, sticky="w", padx=14, pady=(14, 4))
+        pad = dict(padx=16, pady=5)
 
-        ttk.Label(dlg, text=(
-            "Claude is the primary AI reader (highest accuracy).\n"
-            "Gemini is used as a free fallback if no Claude key is set."
-        ), foreground="#444").grid(row=1, column=0, columnspan=2, sticky="w",
-                                   padx=14, pady=(0, 12))
+        tk.Label(dlg, text=T["dlg_ai_heading"],
+                 bg=_SURF, fg=_TXT1,
+                 font=("Helvetica", 13, "bold")).grid(
+            row=1, column=0, columnspan=2, sticky="w", padx=16, pady=(14, 4))
 
-        # ── Claude (primary) ──────────────────────────────────────────────────
-        ttk.Label(dlg, text="Claude Key  (PRIMARY):",
-                  font=("Helvetica", 10, "bold"),
-                  foreground="#1A3A5C").grid(row=2, column=0, sticky="w", **pad)
-        claude_var = tk.StringVar(value=_get_ai_key())
+        tk.Label(dlg, text=T["dlg_ai_desc"],
+                 bg=_SURF, fg=_TXT2,
+                 font=("Helvetica", 10)).grid(
+            row=2, column=0, columnspan=2, sticky="w", padx=16, pady=(0, 12))
+
+        # Claude
+        tk.Label(dlg, text=T["dlg_claude_key"],
+                 bg=_SURF, fg=_ACCENT,
+                 font=("Helvetica", 10, "bold")).grid(
+            row=3, column=0, sticky="w", **pad)
+        claude_var   = tk.StringVar(value=_get_ai_key())
         claude_entry = ttk.Entry(dlg, textvariable=claude_var, width=52, show="*")
-        claude_entry.grid(row=2, column=1, sticky="ew", **pad)
+        claude_entry.grid(row=3, column=1, sticky="ew", **pad)
 
-        ttk.Label(dlg, text="console.anthropic.com  —  most accurate, requires API credit",
-                  foreground="#1A3A5C").grid(
-            row=3, column=1, sticky="w", padx=14, pady=(0, 10))
+        tk.Label(dlg, text=T["dlg_claude_hint"],
+                 bg=_SURF, fg=_ACCENT,
+                 font=("Helvetica", 9)).grid(
+            row=4, column=1, sticky="w", padx=16, pady=(0, 10))
 
-        # ── Gemini (fallback) ─────────────────────────────────────────────────
-        ttk.Label(dlg, text="Gemini Key  (fallback):",
-                  foreground="#666").grid(row=4, column=0, sticky="w", **pad)
-        gemini_var = tk.StringVar(value=_get_gemini_key())
+        # Gemini
+        tk.Label(dlg, text=T["dlg_gemini_key"],
+                 bg=_SURF, fg=_TXT2,
+                 font=("Helvetica", 10)).grid(
+            row=5, column=0, sticky="w", **pad)
+        gemini_var   = tk.StringVar(value=_get_gemini_key())
         gemini_entry = ttk.Entry(dlg, textvariable=gemini_var, width=52, show="*")
-        gemini_entry.grid(row=4, column=1, sticky="ew", **pad)
+        gemini_entry.grid(row=5, column=1, sticky="ew", **pad)
 
-        ttk.Label(dlg,
-                  text="aistudio.google.com  —  free tier, used only if no Claude key",
-                  foreground="#666").grid(
-            row=5, column=1, sticky="w", padx=14, pady=(0, 8))
+        tk.Label(dlg, text=T["dlg_gemini_hint"],
+                 bg=_SURF, fg=_TXT2,
+                 font=("Helvetica", 9)).grid(
+            row=6, column=1, sticky="w", padx=16, pady=(0, 8))
 
-        # ── Show keys toggle ──────────────────────────────────────────────────
+        # Show keys
         show_var = tk.BooleanVar(value=False)
         def toggle_show():
             s = "" if show_var.get() else "*"
             gemini_entry.configure(show=s)
             claude_entry.configure(show=s)
-        ttk.Checkbutton(dlg, text="Show keys", variable=show_var,
+        ttk.Checkbutton(dlg, text=T["dlg_show_keys"], variable=show_var,
                         command=toggle_show).grid(
-            row=6, column=1, sticky="w", padx=14, pady=(0, 6))
+            row=7, column=1, sticky="w", padx=16, pady=(0, 6))
 
-        # ── Save / Cancel ─────────────────────────────────────────────────────
-        btn_frame = ttk.Frame(dlg)
-        btn_frame.grid(row=7, column=0, columnspan=2, sticky="e",
-                       padx=14, pady=10)
+        # Buttons
+        btn_frame = tk.Frame(dlg, bg=_SURF)
+        btn_frame.grid(row=8, column=0, columnspan=2, sticky="e", padx=16, pady=12)
 
         def save():
             gk = gemini_var.get().strip()
@@ -1562,23 +1771,21 @@ class VoucherQRApp(tk.Tk):
             cfg["gemini_api_key"]    = gk
             cfg["anthropic_api_key"] = ck
             _save_config(cfg)
-            if gk:
-                os.environ["GEMINI_API_KEY"]    = gk
-            if ck:
-                os.environ["ANTHROPIC_API_KEY"] = ck
+            if gk: os.environ["GEMINI_API_KEY"]    = gk
+            if ck: os.environ["ANTHROPIC_API_KEY"] = ck
             self._refresh_ai_btn()
             dlg.destroy()
             if ck or gk:
                 provider = "Claude" if ck else "Gemini"
                 messagebox.showinfo(
-                    "AI Enabled",
+                    T["dlg_ai_enabled"],
                     f"{provider} vision is now active.\n"
                     "Auto-read will use AI as the primary reader.")
 
-        ttk.Button(btn_frame, text="Save", style="Primary.TButton",
-                   command=save).pack(side="right", padx=(4, 0))
-        ttk.Button(btn_frame, text="Cancel",
-                   command=dlg.destroy).pack(side="right")
+        _chip(btn_frame, T["dlg_save"], _ACCENT, _SURF, save,
+              hover=_ACCH, bold=True, px=18, py=7).pack(side="right", padx=(6, 0))
+        _chip(btn_frame, T["dlg_cancel"], _BG, _TXT2, dlg.destroy,
+              hover=_BORDER, px=16, py=7).pack(side="right")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
