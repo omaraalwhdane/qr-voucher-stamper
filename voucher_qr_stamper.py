@@ -4,8 +4,10 @@ Petra Drug Store — QR Voucher Stamper
 Batch-stamps QR codes onto pharmacy voucher images using OCR auto-fill.
 
 Requirements:
-    pip install Pillow "qrcode[pil]" pytesseract
+    pip install Pillow "qrcode[pil]" pytesseract anthropic
     brew install tesseract
+    Set ANTHROPIC_API_KEY env-var (or enter it in the AI Key dialog) to enable
+    Claude vision — much more accurate than Tesseract for invoice numbers.
 """
 
 import os
@@ -13,10 +15,48 @@ import re
 import threading
 import time
 import tkinter as tk
+import json
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 import base64
 import io
+
+# ── AI providers (optional — falls back to Tesseract when none available) ────
+try:
+    import anthropic as _anthropic
+    ANTHROPIC_OK = True
+except ImportError:
+    ANTHROPIC_OK = False
+
+try:
+    from google import genai as _genai
+    GEMINI_OK = True
+except ImportError:
+    GEMINI_OK = False
+
+AI_AVAILABLE = ANTHROPIC_OK or GEMINI_OK
+
+_CONFIG_PATH = Path.home() / ".petra_stamper.json"
+
+def _load_config() -> dict:
+    try:
+        return json.loads(_CONFIG_PATH.read_text())
+    except Exception:
+        return {}
+
+def _save_config(data: dict):
+    try:
+        _CONFIG_PATH.write_text(json.dumps(data, indent=2))
+    except Exception:
+        pass
+
+def _get_ai_key() -> str:
+    return (os.environ.get("ANTHROPIC_API_KEY")
+            or _load_config().get("anthropic_api_key", ""))
+
+def _get_gemini_key() -> str:
+    return (os.environ.get("GEMINI_API_KEY")
+            or _load_config().get("gemini_api_key", ""))
 
 try:
     import qrcode
@@ -150,6 +190,48 @@ class EditableTreeview(ttk.Treeview):
         self.item(item, values=vals)
 
 
+# ── Design tokens ─────────────────────────────────────────────────────────────
+_BG      = "#F8FAFC"   # page background
+_SURF    = "#FFFFFF"   # cards / surfaces
+_DARK    = "#0D1B2A"   # header / footer navy
+_DARK2   = "#162233"   # nav hover
+_ACCENT  = "#2563EB"   # primary blue
+_ACCH    = "#1D4ED8"   # primary blue hover
+_ACCL    = "#DBEAFE"   # primary blue tint
+_VIOLET  = "#7C3AED"   # AI / Claude purple
+_VIOH    = "#6D28D9"   # purple hover
+_VIOL    = "#EDE9FE"   # purple tint
+_SUCCESS = "#059669"   # green
+_SUCC_L  = "#D1FAE5"   # green tint
+_DANGER  = "#DC2626"   # red
+_DANH    = "#B91C1C"   # red hover
+_DANL    = "#FEE2E2"   # red tint
+_TXT1    = "#0F172A"   # primary text
+_TXT2    = "#64748B"   # secondary text
+_TXT3    = "#94A3B8"   # muted text
+_BORDER  = "#E2E8F0"   # dividers
+_ROW_E   = "#F8FAFC"   # even table row
+_ROW_O   = "#FFFFFF"   # odd table row
+
+
+def _chip(parent, text, bg, fg, cmd,
+          hover=None, size=11, bold=False, px=14, py=7, tip=None):
+    """Flat modern label-button — bg/fg colour works reliably on macOS."""
+    b = tk.Label(
+        parent, text=text, bg=bg, fg=fg,
+        font=("Helvetica", size, "bold" if bold else "normal"),
+        padx=px, pady=py, cursor="hand2",
+    )
+    b.bind("<Button-1>",        lambda _e: cmd())
+    b.bind("<ButtonRelease-1>", lambda _e: None)   # prevents focus dot
+    if hover:
+        b.bind("<Enter>", lambda _e, w=b, c=hover: w.configure(bg=c))
+        b.bind("<Leave>", lambda _e, w=b, c=bg:    w.configure(bg=c))
+    if tip:
+        Tooltip(b, tip)
+    return b
+
+
 # ── Progress dialog ──────────────────────────────────────────────────────────
 class ProgressDialog(tk.Toplevel):
     def __init__(self, parent, total, title="Processing…"):
@@ -159,39 +241,48 @@ class ProgressDialog(tk.Toplevel):
         self.transient(parent)
         self.grab_set()
         self.protocol("WM_DELETE_WINDOW", self._cancel)
+        self.configure(bg=_SURF)
         self.total = total
         self.cancelled = False
         self._t0 = time.time()
 
-        pw, ph = 480, 160
+        pw, ph = 520, 188
         px = parent.winfo_rootx() + parent.winfo_width()  // 2 - pw // 2
         py = parent.winfo_rooty() + parent.winfo_height() // 2 - ph // 2
         self.geometry(f"{pw}x{ph}+{px}+{py}")
 
-        ttk.Label(self, text=title,
-                  font=("Helvetica", 13, "bold")).pack(pady=(18, 4))
+        # Top accent strip
+        tk.Frame(self, bg=_ACCENT, height=3).pack(fill="x")
+
+        body = tk.Frame(self, bg=_SURF)
+        body.pack(fill="both", expand=True, padx=26, pady=(18, 8))
+
+        tk.Label(body, text=title, bg=_SURF, fg=_TXT1,
+                 font=("Helvetica", 14, "bold"),
+                 anchor="w").pack(fill="x", pady=(0, 5))
 
         self._status = tk.StringVar(value="Starting…")
-        ttk.Label(self, textvariable=self._status,
-                  font=("Helvetica", 10),
-                  foreground="#555").pack(padx=20, anchor="w")
+        tk.Label(body, textvariable=self._status,
+                 bg=_SURF, fg=_TXT2,
+                 font=("Helvetica", 10), anchor="w").pack(fill="x", pady=(0, 10))
 
         self._var = tk.DoubleVar()
-        ttk.Progressbar(self, variable=self._var,
-                        maximum=total, length=440).pack(pady=8, padx=20)
+        ttk.Progressbar(body, variable=self._var,
+                        maximum=total, length=460).pack(fill="x", pady=(0, 8))
 
-        row = ttk.Frame(self)
-        row.pack(fill="x", padx=20)
+        row = tk.Frame(body, bg=_SURF)
+        row.pack(fill="x")
         self._pct = tk.StringVar(value="0%")
         self._eta = tk.StringVar(value="")
-        ttk.Label(row, textvariable=self._pct,
-                  font=("Helvetica", 10, "bold")).pack(side="left")
-        ttk.Label(row, textvariable=self._eta,
-                  font=("Helvetica", 10),
-                  foreground="#777").pack(side="right")
+        tk.Label(row, textvariable=self._pct, bg=_SURF, fg=_ACCENT,
+                 font=("Helvetica", 11, "bold")).pack(side="left")
+        tk.Label(row, textvariable=self._eta, bg=_SURF, fg=_TXT3,
+                 font=("Helvetica", 10)).pack(side="right")
 
-        ttk.Button(self, text="Cancel",
-                   command=self._cancel).pack(pady=(8, 14))
+        foot = tk.Frame(self, bg=_SURF)
+        foot.pack(fill="x", padx=26, pady=(6, 16))
+        _chip(foot, "Cancel", _DANL, _DANGER, self._cancel,
+              hover="#FECACA", px=16, py=6).pack(side="right")
 
     def update(self, done, filename):
         self._var.set(done)
@@ -375,12 +466,147 @@ def _find_year(text):
     return ""
 
 
+_AI_PROMPT = (
+    "This is a cropped region of a pharmacy invoice printed in English.\n"
+    "Extract exactly three values:\n"
+    "1. invoice — the digits immediately after the colon on the INVOICE line "
+    "(e.g. \"INVOICE :2229258\" → \"2229258\").\n"
+    "2. account — the digits AFTER the hyphen on the ACCOUNT line "
+    "(e.g. \"ACCOUNT:1-11237883\" → \"11237883\").\n"
+    "3. year — the 4-digit year from the DATE line.\n\n"
+    "Reply with ONLY valid JSON, nothing else:\n"
+    "{\"invoice\": \"...\", \"account\": \"...\", \"year\": \"...\"}"
+)
+
+
+def _parse_ai_json(raw: str) -> dict:
+    m = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not m:
+        return {}
+    try:
+        data = json.loads(m.group())
+        return {
+            "voucher": re.sub(r"\D", "", str(data.get("invoice", ""))),
+            "client":  re.sub(r"\D", "", str(data.get("account", ""))),
+            "year":    re.sub(r"\D", "", str(data.get("year", ""))),
+        }
+    except Exception:
+        return {}
+
+
+def _crop_header_b64(img) -> str:
+    """Return base-64 JPEG of the invoice header (top-left region)."""
+    w, h = img.size
+    crop = img.crop((0, int(h * 0.08), int(w * 0.60), int(h * 0.35)))
+    buf = io.BytesIO()
+    crop.save(buf, format="JPEG", quality=92)
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def _extract_with_gemini(img) -> dict:
+    """Use Google Gemini Flash (free tier) to extract invoice fields."""
+    if not GEMINI_OK:
+        return {"_error": "google-genai not installed"}
+    key = _get_gemini_key()
+    if not key:
+        return {}
+    try:
+        from google.genai import types as _gtypes
+        client = _genai.Client(api_key=key)
+        w, h = img.size
+        crop = img.crop((0, int(h * 0.08), int(w * 0.60), int(h * 0.35)))
+        buf = io.BytesIO()
+        crop.save(buf, format="JPEG", quality=92)
+        buf.seek(0)
+        part_img  = _gtypes.Part.from_bytes(data=buf.read(),
+                                             mime_type="image/jpeg")
+        part_text = _gtypes.Part.from_text(text=_AI_PROMPT)
+        resp = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[_gtypes.Content(role="user",
+                                      parts=[part_img, part_text])],
+        )
+        result = _parse_ai_json(resp.text.strip())
+        if result:
+            result["reader"] = "Gemini"
+        return result
+    except Exception as e:
+        return {"_error": f"Gemini: {e}"}
+
+
+def _extract_with_claude(img) -> dict:
+    """Use Claude vision (primary) to extract invoice fields."""
+    if not ANTHROPIC_OK:
+        return {"_error": "anthropic not installed"}
+    key = _get_ai_key()
+    if not key:
+        return {}
+    try:
+        img_b64 = _crop_header_b64(img)
+        client = _anthropic.Anthropic(api_key=key)
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=128,
+            messages=[{"role": "user", "content": [
+                {"type": "image",
+                 "source": {"type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": img_b64}},
+                {"type": "text", "text": _AI_PROMPT},
+            ]}],
+        )
+        r = _parse_ai_json(msg.content[0].text.strip())
+        if r:
+            r["reader"] = "Claude"
+        return r
+    except Exception as e:
+        return {"_error": f"Claude: {e}"}
+
+
+def _extract_with_ai(img) -> dict:
+    """Try Claude (primary) then Gemini (fallback) to extract invoice fields.
+
+    Returns a dict with 'voucher', 'client', 'year', 'reader', or {} on failure.
+    Errors are stored under '_error' so the caller can surface them.
+    """
+    # Claude first — paid API, highest accuracy
+    result = _extract_with_claude(img)
+    if result.get("voucher"):
+        return result
+    claude_err = result.get("_error", "")
+
+    # Gemini fallback
+    result = _extract_with_gemini(img)
+    if result.get("voucher"):
+        return result
+    gemini_err = result.get("_error", "")
+
+    combined_err = " | ".join(filter(None, [claude_err, gemini_err]))
+    return {"_error": combined_err or "No AI provider available"}
+
+
 def ocr_extract_fields(path):
     img = Image.open(path)
     if img.mode not in ("RGB", "RGBA", "L"):
         img = img.convert("RGB")
 
     voucher = client = year = ""
+
+    reader  = "Tesseract"
+    ai_error = ""
+
+    # ── AI pass: Gemini (free) or Claude vision — no colon artifacts ──────────
+    ai = _extract_with_ai(img)
+    ai_error = ai.get("_error", "")
+    if ai.get("voucher"):
+        voucher = ai.get("voucher", "")
+        client  = ai.get("client",  "")
+        year    = ai.get("year",    "")
+        reader  = ai.get("reader",  "AI")
+    if voucher and client and year:
+        return {"voucher": voucher, "year": year, "client": client,
+                "type_label": TYPE_OPTIONS[0], "reader": reader,
+                "ai_error": ai_error}
 
     # ── Pass 1: tight crop (fast, works on standard layout) ──────────────────
     text1 = _ocr(img, 0.12, 0.30)
@@ -389,8 +615,6 @@ def ocr_extract_fields(path):
     year    = _find_year(_ocr(img, 0.15, 0.26))
 
     # ── Pass 1b: image-based invoice extraction when text result is suspect ───
-    # Trigger when: missing, too long (≥8 → colon fused in as 9/99), or too
-    # short (≤6 → colon artifact ate a leading digit before we could see it).
     if not voucher or len(voucher) >= 8 or len(voucher) <= 6:
         img_voucher = _find_invoice_image(img, 0.12, 0.30)
         if img_voucher:
@@ -424,7 +648,8 @@ def ocr_extract_fields(path):
             year = _find_year(text_full)
 
     return {"voucher": voucher, "year": year, "client": client,
-            "type_label": TYPE_OPTIONS[0]}
+            "type_label": TYPE_OPTIONS[0], "reader": reader,
+            "ai_error": ai_error}
 
 
 
@@ -491,90 +716,36 @@ class VoucherQRApp(tk.Tk):
         s = ttk.Style(self)
         s.theme_use("clam")
 
-        # General
         s.configure(".", font=("Helvetica", 11))
-        s.configure("TFrame",  background="#F0F4F8")
-        s.configure("TLabel",  background="#F0F4F8")
-
-        # Section label
-        s.configure("Section.TLabel", font=("Helvetica", 11, "bold"),
-                    foreground="#1A3A5C")
-
-        # Header frame
-        s.configure("Header.TFrame", background="#1A3A5C")
-        s.configure("Header.TLabel", background="#1A3A5C",
-                    foreground="white")
-        s.configure("HeaderSub.TLabel", background="#1A3A5C",
-                    foreground="#7EB3E8", font=("Helvetica", 10))
-
-        # Toolbar frame
-        s.configure("Toolbar.TFrame",    background="#FFFFFF")
-        s.configure("Toolbar.TLabel",    background="#FFFFFF",
-                    font=("Helvetica", 10))
-        s.configure("ToolbarSep.TFrame", background="#DADFE8")
-
-        # Buttons — primary (blue)
-        s.configure("Primary.TButton",
-                    font=("Helvetica", 11, "bold"),
-                    padding=(14, 7))
-        s.map("Primary.TButton",
-              foreground=[("!disabled", "#1A3A5C")],
-              background=[("active", "#D0DFF0"), ("!active", "#E8EFF8")])
-
-        # Buttons — accent (generate)
-        s.configure("Accent.TButton",
-                    font=("Helvetica", 12, "bold"),
-                    padding=(18, 9))
-        s.map("Accent.TButton",
-              foreground=[("!disabled", "#7B1C0A")],
-              background=[("active", "#F5C6B0"), ("!active", "#FAE0D5")])
-
-        # Buttons — danger (remove/clear)
-        s.configure("Danger.TButton",
-                    font=("Helvetica", 11),
-                    padding=(12, 7))
-        s.map("Danger.TButton",
-              foreground=[("!disabled", "#5C2020")],
-              background=[("active", "#EDD0D0"), ("!active", "#F5E8E8")])
+        s.configure("TFrame", background=_BG)
+        s.configure("TLabel", background=_BG)
 
         # Treeview
         s.configure("Treeview",
-                    background="white",
-                    fieldbackground="white",
-                    foreground="#1A1A1A",
-                    rowheight=30,
+                    background=_SURF, fieldbackground=_SURF,
+                    foreground=_TXT1, rowheight=34,
                     font=("Helvetica", 11))
         s.configure("Treeview.Heading",
-                    background="#1A3A5C",
-                    foreground="white",
+                    background=_DARK, foreground="#FFFFFF",
                     font=("Helvetica", 11, "bold"),
-                    relief="flat",
-                    padding=(8, 8))
+                    relief="flat", padding=(10, 10))
         s.map("Treeview",
-              background=[("selected", "#C8DEFA")],
-              foreground=[("selected", "#0D1B2A")])
+              background=[("selected", _ACCL)],
+              foreground=[("selected", _TXT1)])
         s.map("Treeview.Heading",
-              background=[("active", "#254E80")])
+              background=[("active", _DARK2)])
 
-        # Scrollbars
+        # Scrollbars — slim
         s.configure("TScrollbar",
-                    troughcolor="#E8ECF2",
-                    background="#B0BEC5",
-                    relief="flat", width=9)
+                    troughcolor=_BG, background=_BORDER,
+                    relief="flat", width=6)
+        s.map("TScrollbar", background=[("active", _TXT3)])
 
-        # Separator
-        s.configure("TSeparator", background="#DADFE8")
-
-        # Progressbar
+        # Separator & progress
+        s.configure("TSeparator", background=_BORDER)
         s.configure("TProgressbar",
-                    troughcolor="#DDE3EE",
-                    background="#2A6099",
-                    thickness=12)
-
-        # Status bar
-        s.configure("Status.TFrame",  background="#ECEFF4")
-        s.configure("Status.TLabel",  background="#ECEFF4",
-                    foreground="#546E7A", font=("Helvetica", 10))
+                    troughcolor=_BORDER, background=_ACCENT,
+                    thickness=6, relief="flat")
 
     # ── Keyboard shortcuts ────────────────────────────────────────────────────
     def _bind_shortcuts(self):
@@ -587,128 +758,129 @@ class VoucherQRApp(tk.Tk):
     def _build_ui(self):
         self.columnconfigure(0, weight=1)
         self.rowconfigure(2, weight=1)
-        self.configure(background="#F0F4F8")
+        self.configure(background=_DARK)
 
         self._build_header()     # row 0
         self._build_toolbar()    # row 1
         self._build_table()      # row 2
         self._build_statusbar()  # row 3
-        self._build_footer()     # row 4
+        self._build_footer()     # row 4+5
 
     # ── Header ────────────────────────────────────────────────────────────────
     def _build_header(self):
-        hdr = ttk.Frame(self, style="Header.TFrame")
+        hdr = tk.Frame(self, bg=_DARK)
         hdr.grid(row=0, column=0, sticky="ew")
-        hdr.columnconfigure(1, weight=1)
+        hdr.columnconfigure(2, weight=1)
 
-        # Logo box
-        logo = tk.Label(hdr, text="🏥", font=("", 26),
-                        bg="#1A3A5C", fg="white")
-        logo.grid(row=0, column=0, rowspan=2, padx=(16, 10), pady=10)
+        # Left accent strip
+        tk.Frame(hdr, bg=_ACCENT, width=4).grid(
+            row=0, column=0, rowspan=3, sticky="ns")
 
-        ttk.Label(hdr, text="Petra Drug Store  —  QR Voucher Stamper",
-                  style="Header.TLabel",
-                  font=("Helvetica", 15, "bold")).grid(
-                      row=0, column=1, sticky="w", pady=(12, 0))
-        ttk.Label(hdr,
-                  text="Batch-stamp QR codes onto pharmacy voucher images  •  "
-                       "OCR auto-fill  •  Duplicate & mismatch detection",
-                  style="HeaderSub.TLabel").grid(
-                      row=1, column=1, sticky="w", pady=(0, 10))
+        # Icon
+        tk.Label(hdr, text="🏥", font=("", 28),
+                 bg=_DARK, fg="white").grid(
+            row=0, column=1, rowspan=2, padx=(16, 12), pady=12)
+
+        tk.Label(hdr, text="Petra Drug Store  —  QR Voucher Stamper",
+                 bg=_DARK, fg="#F1F5F9",
+                 font=("Helvetica", 15, "bold")).grid(
+            row=0, column=2, sticky="w", pady=(14, 2))
+        tk.Label(hdr,
+                 text="Batch-stamp QR codes onto pharmacy voucher images  •  "
+                      "AI-powered OCR auto-fill  •  Duplicate & mismatch detection",
+                 bg=_DARK, fg="#94A3B8",
+                 font=("Helvetica", 10)).grid(
+            row=1, column=2, sticky="w", pady=(0, 12))
+
+        # Bottom rule
+        tk.Frame(hdr, bg=_ACCENT, height=2).grid(
+            row=2, column=0, columnspan=3, sticky="ew")
 
     # ── Toolbar ───────────────────────────────────────────────────────────────
     def _build_toolbar(self):
-        outer = ttk.Frame(self, style="Toolbar.TFrame")
+        outer = tk.Frame(self, bg=_SURF)
         outer.grid(row=1, column=0, sticky="ew")
         outer.columnconfigure(0, weight=1)
 
-        ttk.Separator(outer, orient="horizontal").grid(
-            row=0, column=0, sticky="ew")
-
         # ── Row 1: action buttons ─────────────────────────────────────────────
-        row1 = ttk.Frame(outer, style="Toolbar.TFrame", padding=(10, 7, 10, 3))
-        row1.grid(row=1, column=0, sticky="ew")
+        row1 = tk.Frame(outer, bg=_SURF)
+        row1.grid(row=0, column=0, sticky="ew", padx=14, pady=(10, 6))
 
-        b1 = ttk.Button(row1, text="➕  Add Images",
-                        style="Primary.TButton", command=self._add_images)
-        b1.pack(side="left", padx=(0, 4))
-        Tooltip(b1, "Select voucher JPG/PNG files  (⌘O)")
+        # Import group
+        _chip(row1, "➕  Add Images", _ACCL, _ACCENT, self._add_images,
+              hover="#BFDBFE", tip="Select voucher JPG/PNG files  (⌘O)"
+              ).pack(side="left", padx=(0, 4))
+        _chip(row1, "📂  Folder", _ACCL, _ACCENT, self._add_folder,
+              hover="#BFDBFE", tip="Load all images from a folder"
+              ).pack(side="left", padx=(0, 10))
 
-        b1f = ttk.Button(row1, text="📂  Add Folder",
-                         style="Primary.TButton", command=self._add_folder)
-        b1f.pack(side="left", padx=(0, 8))
-        Tooltip(b1f, "Load ALL images from a folder (great for 1000+ files)")
+        tk.Frame(row1, bg=_BORDER, width=1).pack(side="left", fill="y", padx=(0, 10))
 
-        ttk.Separator(row1, orient="vertical").pack(side="left", fill="y", padx=6)
+        # OCR group
+        _chip(row1, "🔍  Auto-read", _ACCENT, _SURF, self._auto_read_all,
+              hover=_ACCH, bold=True, tip="Read INVOICE, DATE, ACCOUNT via AI+OCR  (⌘R)"
+              ).pack(side="left", padx=(0, 4))
+        _chip(row1, "✔  Verify", _ACCENT, _SURF, self._verify_all,
+              hover=_ACCH, bold=True, tip="Re-scan and compare table data vs image  (⌘K)"
+              ).pack(side="left", padx=(0, 10))
 
-        b2 = ttk.Button(row1, text="🔍  Auto-read (OCR)",
-                        style="Primary.TButton", command=self._auto_read_all)
-        b2.pack(side="left", padx=(4, 4))
-        Tooltip(b2, "Read INVOICE, DATE, ACCOUNT via OCR  (⌘R)")
+        tk.Frame(row1, bg=_BORDER, width=1).pack(side="left", fill="y", padx=(0, 10))
 
-        b3 = ttk.Button(row1, text="✔  Verify Data",
-                        style="Primary.TButton", command=self._verify_all)
-        b3.pack(side="left", padx=(0, 8))
-        Tooltip(b3, "Re-scan and compare table data vs image  (⌘K)")
+        # Remove group
+        _chip(row1, "✖  Remove", _DANL, _DANGER, self._remove_selected,
+              hover="#FECACA", tip="Remove selected rows"
+              ).pack(side="left", padx=(0, 4))
+        _chip(row1, "❌  Mismatches", _DANL, _DANGER, self._remove_mismatches,
+              hover="#FECACA", tip="Delete all rows where OCR data does not match"
+              ).pack(side="left", padx=(0, 4))
+        _chip(row1, "🗑  Clear All", _DANL, _DANGER, self._clear_all,
+              hover="#FECACA", tip="Remove all rows"
+              ).pack(side="left")
 
-        ttk.Separator(row1, orient="vertical").pack(side="left", fill="y", padx=6)
+        # AI indicator (right)
+        self._ai_btn = _chip(row1, "🔑  AI Key", _VIOL, _VIOLET,
+                             self._show_ai_settings, hover="#DDD6FE",
+                             tip="Configure Claude API key for AI-powered OCR")
+        self._ai_btn.pack(side="right")
+        self._refresh_ai_btn()
 
-        b4 = ttk.Button(row1, text="✖  Remove",
-                        style="Danger.TButton", command=self._remove_selected)
-        b4.pack(side="left", padx=4)
-        Tooltip(b4, "Remove selected rows")
-
-        b_mismatch = ttk.Button(row1, text="❌  Delete Mismatches",
-                                style="Danger.TButton",
-                                command=self._remove_mismatches)
-        b_mismatch.pack(side="left", padx=4)
-        Tooltip(b_mismatch, "Remove all rows where OCR data does NOT match  (❌ No)")
-
-        b5 = ttk.Button(row1, text="🗑  Clear All",
-                        style="Danger.TButton", command=self._clear_all)
-        b5.pack(side="left", padx=4)
-        Tooltip(b5, "Remove all rows")
-
-        # ── Row 2: output folder (full width, always visible) ─────────────────
-        row2 = ttk.Frame(outer, style="Toolbar.TFrame", padding=(10, 3, 10, 7))
-        row2.grid(row=2, column=0, sticky="ew")
+        # ── Row 2: output folder ───────────────────────────────────────────────
+        row2 = tk.Frame(outer, bg=_SURF)
+        row2.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 10))
         row2.columnconfigure(1, weight=1)
 
-        ttk.Label(row2, text="📁  Output folder:", style="Toolbar.TLabel",
-                  foreground="#546E7A",
-                  font=("Helvetica", 11, "bold")).grid(
-                      row=0, column=0, sticky="w", padx=(0, 6))
+        tk.Label(row2, text="📁  Output Folder:", bg=_SURF, fg=_TXT2,
+                 font=("Helvetica", 10, "bold")).grid(
+            row=0, column=0, sticky="w", padx=(0, 8))
 
-        self._out_lbl = ttk.Label(row2, textvariable=self._output_folder,
-                                  style="Toolbar.TLabel",
-                                  foreground="#1A5C99",
-                                  font=("Helvetica", 10, "underline"),
-                                  cursor="hand2", anchor="w")
+        self._out_lbl = tk.Label(row2, textvariable=self._output_folder,
+                                 bg=_SURF, fg=_ACCENT,
+                                 font=("Helvetica", 10),
+                                 cursor="hand2", anchor="w")
         self._out_lbl.grid(row=0, column=1, sticky="ew", padx=(0, 8))
         self._out_lbl.bind("<Button-1>", lambda _e: self._set_output())
         self._output_folder.set("(click Browse to choose output folder)")
 
-        bf = ttk.Button(row2, text="Browse…",
-                        command=self._set_output)
-        bf.grid(row=0, column=2, sticky="e")
-        Tooltip(bf, "Choose where stamped images are saved")
+        _chip(row2, "Browse…", _BG, _TXT2, self._set_output,
+              hover=_BORDER, px=12, py=5,
+              tip="Choose where stamped images are saved"
+              ).grid(row=0, column=2)
 
-        ttk.Separator(outer, orient="horizontal").grid(
-            row=3, column=0, sticky="ew")
+        # Bottom border
+        tk.Frame(outer, bg=_BORDER, height=1).grid(row=2, column=0, sticky="ew")
 
     # ── Table ─────────────────────────────────────────────────────────────────
     def _build_table(self):
-        outer = ttk.Frame(self, padding=(10, 6, 10, 0))
-        outer.grid(row=2, column=0, sticky="nsew")
+        outer = tk.Frame(self, bg=_BG)
+        outer.grid(row=2, column=0, sticky="nsew", padx=10, pady=(6, 0))
         outer.rowconfigure(0, weight=1)
         outer.columnconfigure(0, weight=1)
 
-        cols     = ("filename", "voucher", "client", "year", "type", "match")
-        headings = ("  Filename", "  Voucher # (INVOICE)",
-                    "  Client # (ACCOUNT)", "  Year", "  Type", "OCR Match")
-        widths   = (250, 145, 155, 70, 200, 95)
-        # filename and type stretch; fixed columns stay fixed
-        stretches = (True, False, False, False, True, False)
+        cols      = ("filename", "voucher", "client", "year", "type", "match", "reader")
+        headings  = ("  Filename", "  Voucher # (INVOICE)",
+                     "  Client # (ACCOUNT)", "  Year", "  Type", "OCR Match", "Read by")
+        widths    = (250, 145, 155, 70, 200, 100, 95)
+        stretches = (True, False, False, False, True, False, False)
 
         self.tree = EditableTreeview(outer, columns=cols,
                                      show="headings",
@@ -717,21 +889,19 @@ class VoucherQRApp(tk.Tk):
             self.tree.heading(col, text=heading, anchor="w")
             self.tree.column(col, width=width, minwidth=60, anchor="w",
                              stretch=stretch)
-        self.tree.column("year",  anchor="center", stretch=False)
-        self.tree.column("match", anchor="center", width=95, stretch=False)
+        self.tree.column("year",   anchor="center", stretch=False)
+        self.tree.column("match",  anchor="center", width=100, stretch=False)
+        self.tree.column("reader", anchor="center", width=95,  stretch=False)
 
         # Row + state tags
-        self.tree.tag_configure("odd",     background="#FFFFFF")
-        self.tree.tag_configure("even",    background="#EEF4FB")
-        self.tree.tag_configure("match_yes",
-                                foreground="#1B5E20",
-                                font=("Helvetica", 11, "bold"))
-        self.tree.tag_configure("match_no",
-                                foreground="#B71C1C",
-                                background="#FFF5F5",
-                                font=("Helvetica", 11, "bold"))
-        self.tree.tag_configure("match_partial",
-                                foreground="#E65100")
+        self.tree.tag_configure("odd",          background=_ROW_O)
+        self.tree.tag_configure("even",         background=_ROW_E)
+        self.tree.tag_configure("match_yes",    foreground=_SUCCESS,
+                                                font=("Helvetica", 11, "bold"))
+        self.tree.tag_configure("match_no",     foreground=_DANGER,
+                                                background="#FFF5F5",
+                                                font=("Helvetica", 11, "bold"))
+        self.tree.tag_configure("match_partial",foreground="#D97706")
 
         vsb = ttk.Scrollbar(outer, orient="vertical",   command=self.tree.yview)
         hsb = ttk.Scrollbar(outer, orient="horizontal", command=self.tree.xview)
@@ -742,67 +912,97 @@ class VoucherQRApp(tk.Tk):
         hsb.grid(row=1, column=0, sticky="ew")
 
         # Right-click context menu
-        self._ctx_menu = tk.Menu(self, tearoff=0)
-        self._ctx_menu.add_command(label="🔬  Debug OCR (show raw text)",
+        self._ctx_menu = tk.Menu(self, tearoff=0,
+                                 bg=_SURF, fg=_TXT1,
+                                 activebackground=_ACCL,
+                                 activeforeground=_TXT1,
+                                 relief="flat", bd=1)
+        self._ctx_menu.add_command(label="🔬  Debug OCR — show raw text",
                                    command=self._debug_ocr_selected)
         self.tree.bind("<Button-3>", self._on_right_click)
-        self.tree.bind("<Button-2>", self._on_right_click)  # macOS two-finger
+        self.tree.bind("<Button-2>", self._on_right_click)
 
-        # Empty-state label (sits on top of tree when no rows)
-        self._empty = tk.Label(
-            outer,
-            text="\n📂  No images loaded\n\n"
-                 "Click  ➕ Add Images  to get started\n"
-                 "then click  🔍 Auto-read  to extract data automatically",
-            bg="white", fg="#B0BEC5",
-            font=("Helvetica", 13), justify="center")
+        # Empty state — sits on top of the tree when there are no rows
+        self._empty = tk.Frame(outer, bg=_SURF)
         self._empty.grid(row=0, column=0, sticky="nsew")
+        self._empty.rowconfigure(0, weight=1)
+        self._empty.columnconfigure(0, weight=1)
+
+        inner_e = tk.Frame(self._empty, bg=_SURF)
+        inner_e.grid(row=0, column=0)
+        tk.Label(inner_e, text="📂", font=("", 52),
+                 bg=_SURF, fg=_BORDER).pack(pady=(0, 10))
+        tk.Label(inner_e, text="No images loaded yet",
+                 bg=_SURF, fg=_TXT2,
+                 font=("Helvetica", 16, "bold")).pack()
+        tk.Label(inner_e,
+                 text="Click  ➕ Add Images  or  📂 Folder  to get started,\n"
+                      "then  🔍 Auto-read  to extract invoice data automatically.",
+                 bg=_SURF, fg=_TXT3,
+                 font=("Helvetica", 11), justify="center").pack(pady=(6, 0))
 
     # ── Status bar ────────────────────────────────────────────────────────────
     def _build_statusbar(self):
-        bar = ttk.Frame(self, style="Status.TFrame")
+        bar = tk.Frame(self, bg="#F1F5F9")
         bar.grid(row=3, column=0, sticky="ew")
-        ttk.Separator(bar, orient="horizontal").pack(fill="x", side="top")
+        tk.Frame(bar, bg=_BORDER, height=1).pack(fill="x", side="top")
 
-        inner = ttk.Frame(bar, style="Status.TFrame", padding=(12, 6))
-        inner.pack(fill="x")
+        inner = tk.Frame(bar, bg="#F1F5F9")
+        inner.pack(fill="x", padx=14, pady=9)
 
         self._stat_var = tk.StringVar(value="Ready  —  no images loaded")
-        ttk.Label(inner, textvariable=self._stat_var,
-                  style="Status.TLabel").pack(side="left")
+        tk.Label(inner, textvariable=self._stat_var,
+                 bg="#F1F5F9", fg=_TXT2,
+                 font=("Helvetica", 10)).pack(side="left")
 
-        gen = ttk.Button(inner, text="⚡  Generate QR Codes",
-                         style="Accent.TButton",
-                         command=self._start_processing)
-        gen.pack(side="right", padx=(8, 0))
-        Tooltip(gen, "Stamp QR codes onto all loaded images  (⌘↩)")
+        gen = _chip(inner, "⚡  Generate QR Codes",
+                    _ACCENT, _SURF, self._start_processing,
+                    hover=_ACCH, bold=True, size=12, px=22, py=9,
+                    tip="Stamp QR codes onto all loaded images  (⌘↩)")
+        gen.pack(side="right")
 
     # ── Footer ────────────────────────────────────────────────────────────────
     def _build_footer(self):
-        footer = ttk.Frame(self, style="Status.TFrame")
-        footer.grid(row=4, column=0, sticky="ew")
-        ttk.Separator(footer, orient="horizontal").pack(fill="x", side="top")
+        # Thin accent rule above footer
+        tk.Frame(self, bg=_ACCENT, height=2).grid(row=4, column=0, sticky="ew")
 
-        inner = ttk.Frame(footer, style="Status.TFrame", padding=(10, 5))
-        inner.pack(fill="x")
+        footer = tk.Frame(self, bg=_DARK)
+        footer.grid(row=5, column=0, sticky="ew")
+        footer.columnconfigure(0, weight=1)
+
+        inner = tk.Frame(footer, bg=_DARK)
+        inner.pack(fill="x", padx=16, pady=9)
+
+        tk.Label(inner,
+                 text="Petra Drug Store  —  QR Voucher Stamper",
+                 bg=_DARK, fg="#4A6A8A",
+                 font=("Helvetica", 9)).pack(side="left")
+
+        right = tk.Frame(inner, bg=_DARK)
+        right.pack(side="right")
 
         try:
             raw = base64.b64decode(_LAZURD_LOGO_B64)
-            img = Image.open(io.BytesIO(raw)).convert("RGBA")
-            h = 28
-            w = int(img.width * h / img.height)
-            img = img.resize((w, h), Image.LANCZOS)
+            pil_img = Image.open(io.BytesIO(raw)).convert("RGBA")
+            r, g, b, a = pil_img.split()
+            bg_img = Image.new("RGBA", pil_img.size, (13, 27, 42, 255))
+            bg_img.paste(pil_img, mask=a)
+            h = 22
+            w = int(pil_img.width * h / pil_img.height)
+            pil_img = bg_img.resize((w, h), Image.LANCZOS)
             from PIL import ImageTk
-            self._lazurd_logo_img = ImageTk.PhotoImage(img)
-            tk.Label(inner, image=self._lazurd_logo_img,
-                     bg="#ECEFF4").pack(side="right", padx=(6, 0))
+            self._lazurd_logo_img = ImageTk.PhotoImage(pil_img)
+            tk.Label(right, image=self._lazurd_logo_img,
+                     bg=_DARK).pack(side="left", padx=(0, 7))
         except Exception:
             pass
 
-        ttk.Label(inner,
-                  text="Built by Lazurd IT  •  lazurdit.com",
-                  style="Status.TLabel",
-                  font=("Helvetica", 9)).pack(side="right")
+        tk.Label(right, text="Built by  Lazurd IT",
+                 bg=_DARK, fg="#F1F5F9",
+                 font=("Helvetica", 9, "bold")).pack(side="left")
+        tk.Label(right, text="  •  lazurdit.com",
+                 bg=_DARK, fg="#4A6A8A",
+                 font=("Helvetica", 9)).pack(side="left")
 
 
     def _restripe(self):
@@ -869,7 +1069,7 @@ class VoucherQRApp(tk.Tk):
         for path in new_paths:
             iid = self.tree.insert("", "end",
                                    values=(os.path.basename(path),
-                                           "", "", "", TYPE_OPTIONS[0], "—"))
+                                           "", "", "", TYPE_OPTIONS[0], "—", ""))
             self._paths[iid] = path
 
         self._restripe()
@@ -1014,6 +1214,7 @@ class VoucherQRApp(tk.Tk):
 
         def worker():
             failed = []
+            quota_warned = False
             for done, iid in enumerate(items, 1):
                 if dlg.cancelled:
                     break
@@ -1026,13 +1227,42 @@ class VoucherQRApp(tk.Tk):
                     etag      = "match_yes" if all_found else "match_partial"
                     vals      = self.tree.item(iid, "values")
 
-                    def _upd(iid=iid, f=f, vals=vals, mval=mval, etag=etag):
+                    ai_err  = f.get("ai_error", "")
+                    reader  = f.get("reader", "Tesseract")
+
+                    def _upd(iid=iid, f=f, vals=vals, mval=mval,
+                             etag=etag, reader=reader):
                         base = "even" if self.tree.index(iid) % 2 == 0 else "odd"
                         self.tree.item(iid, values=(
                             vals[0], f["voucher"], f["client"],
-                            f["year"], f["type_label"], mval),
+                            f["year"], f["type_label"], mval, reader),
                             tags=(base, etag))
                     self.after(0, _upd)
+
+                    if ai_err:
+                        is_quota = "RESOURCE_EXHAUSTED" in ai_err or "429" in ai_err
+                        is_auth  = "authentication" in ai_err.lower() or "401" in ai_err
+                        if is_quota and quota_warned:
+                            pass
+                        else:
+                            if is_quota:
+                                quota_warned = True
+                            def _warn_ai(err=ai_err, is_q=is_quota, is_a=is_auth):
+                                if is_a:
+                                    msg = ("Claude API key is invalid or expired.\n\n"
+                                           "Go to  🔑 AI Key  in the toolbar to update it.\n\n"
+                                           "Fell back to Tesseract OCR.")
+                                elif is_q:
+                                    msg = ("Claude API quota reached.\n\n"
+                                           "Options:\n"
+                                           "  • Check your usage at console.anthropic.com\n"
+                                           "  • Add a Gemini key in  🔑 AI Key  as a fallback\n\n"
+                                           "Remaining files fell back to Tesseract OCR.")
+                                else:
+                                    msg = (f"AI error: {err}\n\nFell back to Tesseract OCR.")
+                                messagebox.showwarning("AI Read Failed", msg)
+                            self.after(0, _warn_ai)
+
                     if not all_found:
                         failed.append(fname)
                 except Exception as exc:
@@ -1108,14 +1338,14 @@ class VoucherQRApp(tk.Tk):
                     def _set(iid=iid, vals=vals, mval=mval, etag=etag):
                         base = "even" if self.tree.index(iid) % 2 == 0 else "odd"
                         self.tree.item(iid,
-                                       values=(*vals[:5], mval),
+                                       values=(*vals[:6], mval, vals[6] if len(vals) > 6 else ""),
                                        tags=(base, etag))
                     self.after(0, _set)
                 except Exception as exc:
                     def _err(iid=iid, vals=self.tree.item(iid, "values")):
                         base = "even" if self.tree.index(iid) % 2 == 0 else "odd"
                         self.tree.item(iid,
-                                       values=(*vals[:5], "⚠️ Error"),
+                                       values=(*vals[:5], "⚠️ Error", vals[6] if len(vals) > 6 else ""),
                                        tags=(base, "match_partial"))
                     self.after(0, _err)
 
@@ -1251,6 +1481,104 @@ class VoucherQRApp(tk.Tk):
             self.after(0, finish)
 
         threading.Thread(target=worker, daemon=True).start()
+
+
+    # ── AI key helpers ────────────────────────────────────────────────────────
+    def _refresh_ai_btn(self):
+        if _get_ai_key():
+            bg, fg, hov = _SUCC_L, _SUCCESS, "#A7F3D0"
+            label = "✅  Claude: ON"
+        elif _get_gemini_key():
+            bg, fg, hov = _VIOL, _VIOLET, "#DDD6FE"
+            label = "🤖  Gemini: ON"
+        else:
+            bg, fg, hov = _VIOL, _VIOLET, "#DDD6FE"
+            label = "🔑  AI Key"
+        self._ai_btn.configure(text=label, bg=bg, fg=fg)
+        self._ai_btn.bind("<Enter>", lambda _e, w=self._ai_btn, c=hov: w.configure(bg=c))
+        self._ai_btn.bind("<Leave>", lambda _e, w=self._ai_btn, c=bg:  w.configure(bg=c))
+
+    def _show_ai_settings(self):
+        dlg = tk.Toplevel(self)
+        dlg.title("AI Settings")
+        dlg.resizable(False, False)
+        dlg.grab_set()
+
+        pad = dict(padx=14, pady=5)
+
+        ttk.Label(dlg, text="AI Vision Settings",
+                  font=("Helvetica", 13, "bold")).grid(
+            row=0, column=0, columnspan=2, sticky="w", padx=14, pady=(14, 4))
+
+        ttk.Label(dlg, text=(
+            "Claude is the primary AI reader (highest accuracy).\n"
+            "Gemini is used as a free fallback if no Claude key is set."
+        ), foreground="#444").grid(row=1, column=0, columnspan=2, sticky="w",
+                                   padx=14, pady=(0, 12))
+
+        # ── Claude (primary) ──────────────────────────────────────────────────
+        ttk.Label(dlg, text="Claude Key  (PRIMARY):",
+                  font=("Helvetica", 10, "bold"),
+                  foreground="#1A3A5C").grid(row=2, column=0, sticky="w", **pad)
+        claude_var = tk.StringVar(value=_get_ai_key())
+        claude_entry = ttk.Entry(dlg, textvariable=claude_var, width=52, show="*")
+        claude_entry.grid(row=2, column=1, sticky="ew", **pad)
+
+        ttk.Label(dlg, text="console.anthropic.com  —  most accurate, requires API credit",
+                  foreground="#1A3A5C").grid(
+            row=3, column=1, sticky="w", padx=14, pady=(0, 10))
+
+        # ── Gemini (fallback) ─────────────────────────────────────────────────
+        ttk.Label(dlg, text="Gemini Key  (fallback):",
+                  foreground="#666").grid(row=4, column=0, sticky="w", **pad)
+        gemini_var = tk.StringVar(value=_get_gemini_key())
+        gemini_entry = ttk.Entry(dlg, textvariable=gemini_var, width=52, show="*")
+        gemini_entry.grid(row=4, column=1, sticky="ew", **pad)
+
+        ttk.Label(dlg,
+                  text="aistudio.google.com  —  free tier, used only if no Claude key",
+                  foreground="#666").grid(
+            row=5, column=1, sticky="w", padx=14, pady=(0, 8))
+
+        # ── Show keys toggle ──────────────────────────────────────────────────
+        show_var = tk.BooleanVar(value=False)
+        def toggle_show():
+            s = "" if show_var.get() else "*"
+            gemini_entry.configure(show=s)
+            claude_entry.configure(show=s)
+        ttk.Checkbutton(dlg, text="Show keys", variable=show_var,
+                        command=toggle_show).grid(
+            row=6, column=1, sticky="w", padx=14, pady=(0, 6))
+
+        # ── Save / Cancel ─────────────────────────────────────────────────────
+        btn_frame = ttk.Frame(dlg)
+        btn_frame.grid(row=7, column=0, columnspan=2, sticky="e",
+                       padx=14, pady=10)
+
+        def save():
+            gk = gemini_var.get().strip()
+            ck = claude_var.get().strip()
+            cfg = _load_config()
+            cfg["gemini_api_key"]    = gk
+            cfg["anthropic_api_key"] = ck
+            _save_config(cfg)
+            if gk:
+                os.environ["GEMINI_API_KEY"]    = gk
+            if ck:
+                os.environ["ANTHROPIC_API_KEY"] = ck
+            self._refresh_ai_btn()
+            dlg.destroy()
+            if ck or gk:
+                provider = "Claude" if ck else "Gemini"
+                messagebox.showinfo(
+                    "AI Enabled",
+                    f"{provider} vision is now active.\n"
+                    "Auto-read will use AI as the primary reader.")
+
+        ttk.Button(btn_frame, text="Save", style="Primary.TButton",
+                   command=save).pack(side="right", padx=(4, 0))
+        ttk.Button(btn_frame, text="Cancel",
+                   command=dlg.destroy).pack(side="right")
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
