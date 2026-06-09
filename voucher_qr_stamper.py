@@ -829,6 +829,587 @@ def stamp_qr(src, dst, voucher, client, year, type_code):
         img.save(dst, quality=100)
 
 
+# ── Check QR stamping ────────────────────────────────────────────────────────
+_CHECK_AI_PROMPT = (
+    "This is a bank cheque image. Read the MICR line at the very bottom "
+    "of the cheque (the special magnetic ink characters printed on the bottom edge).\n"
+    "Extract exactly two values:\n"
+    "1. bank_id — the 2-digit bank routing / bank code (e.g. '02').\n"
+    "2. account — the full customer account number (the long number, e.g. '6901963631300100').\n"
+    "The MICR line typically looks like: \"CCCCC D\" BB\" TTTT:ACCOUNT\"\n"
+    "where BB is the bank code (2 digits) and ACCOUNT is the long number after the colon.\n\n"
+    "Reply with ONLY valid JSON, nothing else:\n"
+    "{\"bank_id\": \"...\", \"account\": \"...\"}"
+)
+
+
+def _crop_check_bottom_b64(img) -> str:
+    """Return base-64 JPEG of the full cheque (used for AI to find the MICR line)."""
+    buf = io.BytesIO()
+    rgb = img.convert("RGB")
+    rgb.save(buf, format="JPEG", quality=90)
+    return base64.b64encode(buf.getvalue()).decode()
+
+
+def _parse_check_ai_json(raw: str) -> dict:
+    m = re.search(r"\{.*\}", raw, re.DOTALL)
+    if not m:
+        return {}
+    try:
+        data = json.loads(m.group())
+        return {
+            "bank_id": re.sub(r"\D", "", str(data.get("bank_id", ""))),
+            "account": re.sub(r"\D", "", str(data.get("account", ""))),
+        }
+    except Exception:
+        return {}
+
+
+def _extract_check_with_claude(img) -> dict:
+    if not ANTHROPIC_OK:
+        return {"_error": "anthropic not installed"}
+    key = _get_ai_key()
+    if not key:
+        return {}
+    try:
+        img_b64 = _crop_check_bottom_b64(img)
+        client  = _anthropic.Anthropic(api_key=key)
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=128,
+            messages=[{"role": "user", "content": [
+                {"type": "image",
+                 "source": {"type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": img_b64}},
+                {"type": "text", "text": _CHECK_AI_PROMPT},
+            ]}],
+        )
+        r = _parse_check_ai_json(msg.content[0].text.strip())
+        if r:
+            r["reader"] = "Claude"
+        return r
+    except Exception as e:
+        return {"_error": f"Claude: {e}"}
+
+
+def _extract_check_with_gemini(img) -> dict:
+    if not GEMINI_OK:
+        return {"_error": "google-genai not installed"}
+    key = _get_gemini_key()
+    if not key:
+        return {}
+    try:
+        from google.genai import types as _gtypes
+        client  = _genai.Client(api_key=key)
+        buf = io.BytesIO()
+        img.convert("RGB").save(buf, format="JPEG", quality=90)
+        buf.seek(0)
+        part_img  = _gtypes.Part.from_bytes(data=buf.read(), mime_type="image/jpeg")
+        part_text = _gtypes.Part.from_text(text=_CHECK_AI_PROMPT)
+        resp = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[_gtypes.Content(role="user",
+                                      parts=[part_img, part_text])],
+        )
+        r = _parse_check_ai_json(resp.text.strip())
+        if r:
+            r["reader"] = "Gemini"
+        return r
+    except Exception as e:
+        return {"_error": f"Gemini: {e}"}
+
+
+def _extract_check_with_tesseract(img) -> dict:
+    """Fallback: OCR bottom 12% strip and parse MICR-like patterns."""
+    w, h = img.size
+    strip = img.crop((0, int(h * 0.88), w, h))
+    strip = strip.resize((strip.width * 3, strip.height * 3), Image.LANCZOS)
+    strip = strip.convert("L")
+    strip = ImageEnhance.Contrast(strip).enhance(2.5)
+    strip = strip.filter(ImageFilter.SHARPEN)
+    text = pytesseract.image_to_string(strip, lang="eng",
+                                       config="--psm 7 --oem 3")
+    # Remove MICR symbols and keep digits + spaces
+    cleaned = re.sub(r'[^\d\s:]', ' ', text)
+
+    bank_id = ""
+    account = ""
+
+    # Find the short 2-digit bank code (often surrounded by spaces after a separator)
+    m_bank = re.search(r'\b(\d{2})\b', cleaned)
+    if m_bank:
+        bank_id = m_bank.group(1)
+
+    # Find the longest number as the account
+    numbers = re.findall(r'\d+', cleaned)
+    if numbers:
+        account = max(numbers, key=len)
+
+    return {"bank_id": bank_id, "account": account,
+            "reader": "Tesseract", "_error": ""}
+
+
+def extract_check_fields(path) -> dict:
+    """Extract bank_id and account from a cheque image."""
+    img = Image.open(path)
+    if img.mode not in ("RGB", "RGBA", "L"):
+        img = img.convert("RGB")
+
+    # Try AI providers first
+    ai_error = ""
+    result = _extract_check_with_claude(img)
+    if not (result.get("bank_id") and result.get("account")):
+        ai_error = result.get("_error", "")
+        result2  = _extract_check_with_gemini(img)
+        if result2.get("bank_id") and result2.get("account"):
+            result = result2
+        else:
+            ai_error = " | ".join(filter(None,
+                                          [ai_error, result2.get("_error", "")]))
+            result = _extract_check_with_tesseract(img)
+
+    result["ai_error"] = ai_error
+    return result
+
+
+def stamp_check_qr(src, dst, bank_id, account):
+    """Generate QR with format PDS:C1:B{bank_id}:A{account} and stamp top-right."""
+    data   = f"PDS:C1:B{bank_id}:A{account}"
+    qr     = qrcode.QRCode(version=None,
+                            error_correction=qrcode.constants.ERROR_CORRECT_M,
+                            box_size=10, border=2)
+    qr.add_data(data)
+    qr.make(fit=True)
+    qr_img = qr.make_image(fill_color="black",
+                            back_color="white").convert("RGB")
+    qr_img = qr_img.resize((QR_SIZE, QR_SIZE), Image.LANCZOS)
+
+    img = Image.open(src)
+    if img.mode not in ("RGB", "RGBA"):
+        img = img.convert("RGB")
+
+    # Top-left corner
+    x = QR_MARGIN
+    y = QR_MARGIN
+    if img.mode == "RGBA":
+        img.paste(qr_img.convert("RGBA"), (x, y))
+    else:
+        img.paste(qr_img, (x, y))
+
+    ext = Path(dst).suffix.lower()
+    if ext in (".jpg", ".jpeg"):
+        img.save(dst, format="JPEG", quality=100, subsampling=0)
+    elif ext == ".png":
+        img.save(dst, format="PNG", compress_level=0)
+    else:
+        img.save(dst, quality=100)
+
+
+# ── Check Stamper window ──────────────────────────────────────────────────────
+class CheckStamperWindow(tk.Toplevel):
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.title("Check QR Stamper — Petra Drug Store")
+        self.geometry("900x680")
+        self.minsize(720, 480)
+        self.configure(background=_DARK)
+
+        self._output_folder = tk.StringVar(value="")
+        self._paths: dict[str, str] = {}
+        self._out_placeholder_active = True
+
+        self._build_ui()
+
+    # ── Layout ────────────────────────────────────────────────────────────────
+    def _build_ui(self):
+        self.columnconfigure(0, weight=1)
+        self.rowconfigure(2, weight=1)
+
+        self._build_header()
+        self._build_toolbar()
+        self._build_table()
+        self._build_statusbar()
+        self._build_footer()
+
+    def _build_header(self):
+        hdr = tk.Frame(self, bg=_DARK)
+        hdr.grid(row=0, column=0, sticky="ew")
+        hdr.columnconfigure(2, weight=1)
+
+        tk.Frame(hdr, bg="#059669", width=4).grid(
+            row=0, column=0, rowspan=3, sticky="ns")
+
+        tk.Label(hdr, text="🏦", font=("", 26),
+                 bg=_DARK, fg="white").grid(
+            row=0, column=1, rowspan=2, padx=(16, 12), pady=10)
+
+        tk.Label(hdr, text="Check QR Stamper",
+                 bg=_DARK, fg="#F1F5F9",
+                 font=("Helvetica", 14, "bold")).grid(
+            row=0, column=2, sticky="w", pady=(12, 2))
+
+        tk.Label(hdr,
+                 text="Stamp QR codes onto bank cheques  •  "
+                      "Reads MICR line (Bank ID + Account)  •  QR in top-right corner",
+                 bg=_DARK, fg="#94A3B8",
+                 font=("Helvetica", 10)).grid(
+            row=1, column=2, sticky="w", pady=(0, 10))
+
+        tk.Frame(hdr, bg="#059669", height=2).grid(
+            row=2, column=0, columnspan=4, sticky="ew")
+
+    def _build_toolbar(self):
+        outer = tk.Frame(self, bg=_SURF)
+        outer.grid(row=1, column=0, sticky="ew")
+        outer.columnconfigure(0, weight=1)
+
+        row1 = tk.Frame(outer, bg=_SURF)
+        row1.grid(row=0, column=0, sticky="ew", padx=14, pady=(10, 6))
+
+        _chip(row1, "➕  Add Cheques", _ACCL, _ACCENT,
+              self._add_images, hover="#BFDBFE").pack(side="left", padx=(0, 4))
+        _chip(row1, "📂  Folder", _ACCL, _ACCENT,
+              self._add_folder, hover="#BFDBFE").pack(side="left", padx=(0, 10))
+
+        tk.Frame(row1, bg=_BORDER, width=1).pack(side="left", fill="y", padx=(0, 10))
+
+        _chip(row1, "🔍  Auto-read MICR", _ACCENT, _SURF,
+              self._auto_read_all, hover=_ACCH, bold=True).pack(side="left", padx=(0, 10))
+
+        tk.Frame(row1, bg=_BORDER, width=1).pack(side="left", fill="y", padx=(0, 10))
+
+        _chip(row1, "✖  Remove", _DANL, _DANGER,
+              self._remove_selected, hover="#FECACA").pack(side="left", padx=(0, 4))
+        _chip(row1, "🗑  Clear All", _DANL, _DANGER,
+              self._clear_all, hover="#FECACA").pack(side="left")
+
+        # Row 2: output folder
+        row2 = tk.Frame(outer, bg=_SURF)
+        row2.grid(row=1, column=0, sticky="ew", padx=14, pady=(0, 10))
+        row2.columnconfigure(1, weight=1)
+
+        tk.Label(row2, text="📁  Output Folder:", bg=_SURF, fg=_TXT2,
+                 font=("Helvetica", 10, "bold")).grid(row=0, column=0,
+                                                       sticky="w", padx=(0, 8))
+
+        self._out_lbl = tk.Label(row2, textvariable=self._output_folder,
+                                 bg=_SURF, fg=_ACCENT,
+                                 font=("Helvetica", 10), cursor="hand2", anchor="w")
+        self._out_lbl.grid(row=0, column=1, sticky="ew", padx=(0, 8))
+        self._out_lbl.bind("<Button-1>", lambda _e: self._set_output())
+        self._output_folder.set("(click Browse to choose output folder)")
+
+        _chip(row2, "Browse…", _BG, _TXT2, self._set_output,
+              hover=_BORDER, px=12, py=5).grid(row=0, column=2)
+
+        tk.Frame(outer, bg=_BORDER, height=1).grid(row=2, column=0, sticky="ew")
+
+    def _build_table(self):
+        outer = tk.Frame(self, bg=_BG)
+        outer.grid(row=2, column=0, sticky="nsew", padx=10, pady=(6, 0))
+        outer.rowconfigure(0, weight=1)
+        outer.columnconfigure(0, weight=1)
+
+        cols     = ("filename", "bank_id", "account", "status", "reader")
+        headings = ("  Filename", "  Bank ID (B)", "  Account (A)", "  Status", "Read by")
+        widths   = (280, 100, 260, 120, 95)
+
+        self.tree = ttk.Treeview(outer, columns=cols, show="headings",
+                                 selectmode="extended")
+        for col, heading, width in zip(cols, headings, widths):
+            self.tree.heading(col, text=heading, anchor="w")
+            self.tree.column(col, width=width, minwidth=60, anchor="w",
+                             stretch=(col in ("filename", "account")))
+        self.tree.column("status", anchor="center", stretch=False)
+        self.tree.column("reader", anchor="center", width=95, stretch=False)
+
+        self.tree.tag_configure("odd",      background=_ROW_O)
+        self.tree.tag_configure("even",     background=_ROW_E)
+        self.tree.tag_configure("ok",       foreground=_SUCCESS,
+                                            font=("Helvetica", 11, "bold"))
+        self.tree.tag_configure("partial",  foreground="#D97706")
+        self.tree.tag_configure("error",    foreground=_DANGER,
+                                            background="#FFF5F5")
+
+        vsb = ttk.Scrollbar(outer, orient="vertical",   command=self.tree.yview)
+        hsb = ttk.Scrollbar(outer, orient="horizontal", command=self.tree.xview)
+        self.tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        vsb.grid(row=0, column=1, sticky="ns")
+        hsb.grid(row=1, column=0, sticky="ew")
+
+        # Empty state overlay
+        self._empty = tk.Frame(outer, bg=_SURF)
+        self._empty.grid(row=0, column=0, sticky="nsew")
+        self._empty.rowconfigure(0, weight=1)
+        self._empty.columnconfigure(0, weight=1)
+        inner_e = tk.Frame(self._empty, bg=_SURF)
+        inner_e.grid(row=0, column=0)
+        tk.Label(inner_e, text="🏦", font=("", 48),
+                 bg=_SURF, fg=_BORDER).pack(pady=(0, 10))
+        tk.Label(inner_e, text="No cheque images loaded yet",
+                 bg=_SURF, fg=_TXT2,
+                 font=("Helvetica", 15, "bold")).pack()
+        tk.Label(inner_e,
+                 text="Click  ➕ Add Cheques  or  📂 Folder  to get started,\n"
+                      "then  🔍 Auto-read MICR  to extract bank data automatically.",
+                 bg=_SURF, fg=_TXT3,
+                 font=("Helvetica", 11), justify="center").pack(pady=(6, 0))
+
+    def _build_statusbar(self):
+        bar = tk.Frame(self, bg="#F1F5F9")
+        bar.grid(row=3, column=0, sticky="ew")
+        tk.Frame(bar, bg=_BORDER, height=1).pack(fill="x", side="top")
+        inner = tk.Frame(bar, bg="#F1F5F9")
+        inner.pack(fill="x", padx=14, pady=9)
+
+        self._stat_var = tk.StringVar(value="Ready  —  no cheques loaded")
+        tk.Label(inner, textvariable=self._stat_var,
+                 bg="#F1F5F9", fg=_TXT2,
+                 font=("Helvetica", 10)).pack(side="left")
+
+        _chip(inner, "⚡  Stamp QR Codes", "#059669", _SURF,
+              self._start_processing,
+              hover="#047857", bold=True, size=12, px=22, py=9).pack(side="right")
+
+    def _build_footer(self):
+        tk.Frame(self, bg="#059669", height=2).grid(row=4, column=0, sticky="ew")
+        footer = tk.Frame(self, bg=_DARK)
+        footer.grid(row=5, column=0, sticky="ew")
+        inner = tk.Frame(footer, bg=_DARK)
+        inner.pack(fill="x", padx=16, pady=8)
+        tk.Label(inner,
+                 text="QR format:  PDS:C1:B{bank_id}:A{account}  •  Stamped top-left",
+                 bg=_DARK, fg="#4A6A8A",
+                 font=("Helvetica", 9)).pack(side="left")
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+    def _restripe(self):
+        for iid in self.tree.get_children():
+            cur  = [t for t in self.tree.item(iid, "tags")
+                    if t not in ("odd", "even")]
+            base = "even" if self.tree.index(iid) % 2 == 0 else "odd"
+            self.tree.item(iid, tags=(base, *cur))
+
+    def _refresh_stats(self):
+        items = self.tree.get_children()
+        n = len(items)
+        if n == 0:
+            self._stat_var.set("Ready  —  no cheques loaded")
+            self._empty.lift()
+            return
+        self._empty.lower()
+        ok = sum(1 for i in items if "ok" in self.tree.item(i, "tags"))
+        parts = [f"🏦 {n} cheque{'s' if n != 1 else ''}"]
+        if ok:
+            parts.append(f"✅ {ok} read")
+        out = self._output_folder.get()
+        if out and os.path.isdir(out):
+            short = out if len(out) <= 44 else "…" + out[-42:]
+            parts.append(f"📁 {short}")
+        self._stat_var.set("   •   ".join(parts))
+
+    # ── Button handlers ───────────────────────────────────────────────────────
+    def _add_images(self):
+        paths = filedialog.askopenfilenames(
+            title="Select Cheque Images",
+            filetypes=[("Images", "*.jpg *.jpeg *.png"), ("All files", "*.*")])
+        self._insert_paths(list(paths))
+
+    def _add_folder(self):
+        folder = filedialog.askdirectory(title="Select Folder Containing Cheque Images")
+        if not folder:
+            return
+        exts  = {".jpg", ".jpeg", ".png"}
+        paths = sorted(str(p) for p in Path(folder).iterdir()
+                       if p.is_file() and p.suffix.lower() in exts)
+        if not paths:
+            messagebox.showinfo("No Images Found",
+                                f"No JPG/PNG images found in:\n{folder}")
+            return
+        self._insert_paths(paths)
+
+    def _insert_paths(self, paths):
+        existing  = set(self._paths.values())
+        new_paths = [p for p in paths if p not in existing]
+        if not new_paths:
+            messagebox.showinfo("Already Loaded",
+                                "All selected images are already in the table.")
+            return
+        for path in new_paths:
+            iid = self.tree.insert("", "end",
+                                   values=(os.path.basename(path),
+                                           "", "", "—", ""))
+            self._paths[iid] = path
+        self._restripe()
+        self._refresh_stats()
+
+        if not self._output_folder.get() or \
+           not os.path.isdir(self._output_folder.get()):
+            first_dir = os.path.dirname(list(self._paths.values())[0])
+            out = os.path.join(first_dir, "CheckQR_Output")
+            os.makedirs(out, exist_ok=True)
+            self._output_folder.set(out)
+            self._out_placeholder_active = False
+
+        messagebox.showinfo(
+            "Cheques Added",
+            f"{len(new_paths)} cheque image(s) loaded.\n\n"
+            "Click  🔍 Auto-read MICR  to extract bank data automatically.")
+
+    def _remove_selected(self):
+        for iid in self.tree.selection():
+            self._paths.pop(iid, None)
+            self.tree.delete(iid)
+        self._restripe()
+        self._refresh_stats()
+
+    def _clear_all(self):
+        self.tree.delete(*self.tree.get_children())
+        self._paths.clear()
+        self._refresh_stats()
+
+    def _set_output(self):
+        folder = filedialog.askdirectory(title="Choose Output Folder")
+        if folder:
+            self._output_folder.set(folder)
+            self._out_placeholder_active = False
+            self._refresh_stats()
+
+    # ── MICR auto-read ────────────────────────────────────────────────────────
+    def _auto_read_all(self):
+        items = self.tree.get_children()
+        if not items:
+            messagebox.showinfo("No Cheques", "Please add cheque images first.")
+            return
+        dlg = ProgressDialog(self, total=len(items), title="Reading MICR Lines…")
+
+        def worker():
+            failed = []
+            for done, iid in enumerate(items, 1):
+                if dlg.cancelled:
+                    break
+                path  = self._paths[iid]
+                fname = os.path.basename(path)
+                try:
+                    f      = extract_check_fields(path)
+                    bid    = f.get("bank_id", "")
+                    acc    = f.get("account", "")
+                    reader = f.get("reader", "Tesseract")
+                    all_ok = bool(bid and acc)
+                    status = "✅ Ready" if all_ok else "⚠️ Partial"
+                    etag   = "ok" if all_ok else "partial"
+
+                    def _upd(iid=iid, bid=bid, acc=acc,
+                             status=status, etag=etag, reader=reader,
+                             fname=fname):
+                        base = "even" if self.tree.index(iid) % 2 == 0 else "odd"
+                        self.tree.item(iid,
+                                       values=(fname, bid, acc, status, reader),
+                                       tags=(base, etag))
+                    self.after(0, _upd)
+                    if not all_ok:
+                        failed.append(fname)
+                except Exception as exc:
+                    failed.append(f"{fname}: {exc}")
+                self.after(0, dlg.update, done, fname)
+
+            def finish():
+                dlg.destroy()
+                self.after(0, self._refresh_stats)
+                n = len(items)
+                if failed:
+                    messagebox.showwarning(
+                        "MICR Read — Partial Results",
+                        f"{n - len(failed)} of {n} cheques read successfully.\n\n"
+                        f"Could not fully read {len(failed)} file(s):\n"
+                        + "\n".join(failed[:15])
+                        + "\n\nDouble-click a cell to fill it manually.")
+                else:
+                    messagebox.showinfo(
+                        "MICR Read Complete ✅",
+                        f"All {n} cheques read successfully!\n\n"
+                        "Click  ⚡ Stamp QR Codes  to generate.")
+            self.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    # ── Generation ────────────────────────────────────────────────────────────
+    def _start_processing(self):
+        items = self.tree.get_children()
+        if not items:
+            messagebox.showinfo("No Cheques", "Please add cheque images first.")
+            return
+        out = self._output_folder.get()
+        if not out or not os.path.isdir(out):
+            messagebox.showwarning("Output Folder",
+                                   "Please select a valid output folder first.")
+            return
+
+        rows, skipped = [], []
+        for iid in items:
+            vals   = self.tree.item(iid, "values")
+            fname  = vals[0] if vals else ""
+            bid    = vals[1].strip() if len(vals) > 1 else ""
+            acc    = vals[2].strip() if len(vals) > 2 else ""
+            if not (bid and acc):
+                skipped.append(fname)
+                continue
+            rows.append((self._paths[iid], bid, acc))
+
+        if not rows:
+            messagebox.showwarning(
+                "Nothing to Process",
+                "No rows have complete data (Bank ID + Account).\n\n"
+                "Run  🔍 Auto-read MICR  first, then try again.")
+            return
+
+        if skipped:
+            proceed = messagebox.askyesno(
+                "Some Rows Skipped",
+                f"⚠️  {len(skipped)} row(s) have missing data and will be skipped.\n"
+                f"✅  {len(rows)} row(s) will be stamped.\n\nProceed?")
+            if not proceed:
+                return
+
+        dlg = ProgressDialog(self, total=len(rows), title="Stamping QR Codes…")
+
+        def worker():
+            errors = []
+            for done, (src, bid, acc) in enumerate(rows, 1):
+                if dlg.cancelled:
+                    break
+                fname = os.path.basename(src)
+                dst   = os.path.join(out,
+                                     Path(fname).stem + "_QR" + Path(fname).suffix)
+                try:
+                    stamp_check_qr(src, dst, bid, acc)
+                except Exception as exc:
+                    errors.append(f"{fname}: {exc}")
+                self.after(0, dlg.update, done, fname)
+
+            def finish():
+                dlg.destroy()
+                ok = len(rows) - len(errors)
+                if dlg.cancelled:
+                    messagebox.showinfo("Cancelled",
+                                        f"Stopped after {ok} cheque(s) stamped.")
+                elif errors:
+                    messagebox.showerror(
+                        "Done with Errors",
+                        f"{ok} succeeded  •  {len(errors)} failed:\n\n"
+                        + "\n".join(errors[:20]))
+                else:
+                    messagebox.showinfo(
+                        "Done ✅",
+                        f"Successfully stamped {len(rows)} cheque(s)!\n\n"
+                        f"Saved to:\n{out}")
+            self.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+
 # ── Main application ─────────────────────────────────────────────────────────
 class VoucherQRApp(tk.Tk):
     def __init__(self):
@@ -939,11 +1520,17 @@ class VoucherQRApp(tk.Tk):
         lbl_sub.grid(row=1, column=2, sticky="w", pady=(0, 12))
         self._lw["app_sub"] = lbl_sub
 
+        # Check Stamper button (opens new window)
+        check_btn = _chip(hdr, "🏦  Check Stamper",
+                          "#064E3B", "#34D399", self._open_check_stamper,
+                          hover="#065F46", size=11, bold=True, px=14, py=6)
+        check_btn.grid(row=0, column=3, rowspan=2, padx=(0, 8), pady=8)
+
         # Language toggle button (top-right of header)
         lang_btn = _chip(hdr, T["lang_switch"],
                          "#1A3255", "#7EB8DC", self._toggle_lang,
                          hover="#1E3D66", size=11, bold=True, px=14, py=6)
-        lang_btn.grid(row=0, column=3, rowspan=2, padx=(0, 16), pady=8)
+        lang_btn.grid(row=0, column=4, rowspan=2, padx=(0, 16), pady=8)
         self._lw["lang_switch"] = lang_btn
 
         # Bottom rule
@@ -1164,6 +1751,11 @@ class VoucherQRApp(tk.Tk):
                  bg=_DARK, fg="#4A6A8A",
                  font=("Helvetica", 9)).pack(side="left")
 
+
+    def _open_check_stamper(self):
+        """Open the Check QR Stamper window."""
+        win = CheckStamperWindow(self)
+        win.focus_set()
 
     # ── Language switching ────────────────────────────────────────────────────
     def _t(self, key: str) -> str:
