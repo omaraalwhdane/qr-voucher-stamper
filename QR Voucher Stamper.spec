@@ -6,7 +6,11 @@ a = Analysis(
     pathex=[],
     binaries=[],
     datas=[('tesseract', 'tesseract')],
-    hiddenimports=['PIL._tkinter_finder', 'pytesseract', 'qrcode'],
+    hiddenimports=[
+        'PIL._tkinter_finder', 'pytesseract', 'qrcode',
+        'anthropic', 'anthropic._legacy_api', 'anthropic.resources',
+        'google.genai', 'google.genai.types',
+    ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
